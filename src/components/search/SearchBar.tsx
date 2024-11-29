@@ -4,6 +4,7 @@ import { useLoadScript } from '@react-google-maps/api';
 import VehicleForm from './VehicleForm';
 import BreakdownForm from '../breakdown/BreakdownForm';
 import ContactForm from '../contact/ContactForm';
+import WaitingScreen from '../waiting/WaitingScreen';
 import ProgressSteps from '../progress/ProgressSteps';
 
 interface Location {
@@ -34,6 +35,7 @@ const SearchBar = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [vehicleData, setVehicleData] = useState<any>(null);
   const [breakdownData, setBreakdownData] = useState<any>(null);
+  const [contactData, setContactData] = useState<any>(null);
 
   useEffect(() => {
     let autocompleteService: google.maps.places.AutocompleteService | null = null;
@@ -154,13 +156,8 @@ const SearchBar = () => {
     setCurrentStep(3);
   };
 
-  const handleContactSubmit = (contactData: { phoneNumber: string }) => {
-    console.log('Complete Data:', {
-      location: selectedLocation,
-      vehicle: vehicleData,
-      breakdown: breakdownData,
-      contact: contactData
-    });
+  const handleContactSubmit = (data: { phoneNumber: string }) => {
+    setContactData(data);
     setCurrentStep(4);
   };
 
@@ -252,13 +249,17 @@ const SearchBar = () => {
           />
         );
       case 4:
-        return (
-          <div className="text-center text-white">
-            <h3 className="text-xl font-semibold mb-4">Demande envoyée !</h3>
-            <p>Nous recherchons un dépanneur disponible dans votre zone...</p>
-            <p className="mt-2 text-sm text-gray-400">Vous serez contacté rapidement au numéro fourni.</p>
-          </div>
-        );
+        if (selectedLocation && vehicleData && breakdownData && contactData) {
+          return (
+            <WaitingScreen
+              location={selectedLocation}
+              vehicleData={vehicleData}
+              breakdownData={breakdownData}
+              contactData={contactData}
+            />
+          );
+        }
+        return null;
       default:
         return null;
     }
@@ -266,7 +267,7 @@ const SearchBar = () => {
 
   return (
     <div className="w-full search-container">
-      {selectedLocation && <ProgressSteps currentStep={currentStep} />}
+      {selectedLocation && currentStep < 4 && <ProgressSteps currentStep={currentStep} />}
       {renderStep()}
     </div>
   );

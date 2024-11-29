@@ -33,7 +33,7 @@ const BreakdownForm: React.FC<BreakdownFormProps> = ({ onSubmit, onBack, locatio
           <select
             value={breakdownType}
             onChange={(e) => setBreakdownType(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-600 rounded-lg p-3 text-white [&>option]:text-black"
+            className="w-full bg-gray-800 border border-gray-600 rounded-lg p-3 text-white [&>option]:text-white"
             required
           >
             <option value="" disabled>Type de panne</option>
@@ -66,7 +66,7 @@ const BreakdownForm: React.FC<BreakdownFormProps> = ({ onSubmit, onBack, locatio
           </button>
           <button
             type="submit"
-            className="flex-1 bg-primary-600 text-white py-3 rounded-lg hover:bg-primary-700 transition-colors"
+            className="flex-1 bg-accent-500 text-white py-3 rounded-lg hover:bg-accent-600 transition-colors"
           >
             Continuer
           </button>

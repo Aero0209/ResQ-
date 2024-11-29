@@ -20,7 +20,7 @@ const ProgressSteps: React.FC<ProgressStepsProps> = ({ currentStep }) => {
         
         {/* Active Progress Bar */}
         <div 
-          className="absolute h-1 bg-primary-600 top-1/2 transform -translate-y-1/2 z-0 transition-all duration-300"
+          className="absolute h-1 bg-accent-500 top-1/2 transform -translate-y-1/2 z-0 transition-all duration-300"
           style={{ width: `${(currentStep - 1) * 50}%` }}
         />
 
@@ -35,7 +35,7 @@ const ProgressSteps: React.FC<ProgressStepsProps> = ({ currentStep }) => {
               <div
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 ${
                   isActive
-                    ? 'bg-primary-600 text-white'
+                    ? 'bg-accent-500 text-white'
                     : 'bg-gray-700 text-gray-400'
                 }`}
               >

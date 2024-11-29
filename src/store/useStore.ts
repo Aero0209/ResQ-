@@ -1,4 +1,4 @@
-import create from 'zustand';
+import { create } from 'zustand';
 import { User } from 'firebase/auth';
 
 interface AuthState {
@@ -8,7 +8,7 @@ interface AuthState {
   setLoading: (loading: boolean) => void;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>()((set) => ({
   user: null,
   loading: true,
   setUser: (user) => set({ user }),
@@ -20,7 +20,7 @@ interface LocationState {
   setUserLocation: (location: GeolocationCoordinates | null) => void;
 }
 
-export const useLocationStore = create<LocationState>((set) => ({
+export const useLocationStore = create<LocationState>()((set) => ({
   userLocation: null,
   setUserLocation: (location) => set({ userLocation: location }),
 })); 

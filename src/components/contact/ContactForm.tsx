@@ -21,23 +21,28 @@ const ContactForm: React.FC<ContactFormProps> = ({ onSubmit, onBack, location })
     // Remove all non-digit characters
     const cleaned = value.replace(/\D/g, '');
     
-    // Format as Belgian phone number: +32 XXX XX XX XX
-    if (cleaned.length <= 2) return cleaned;
-    if (cleaned.length <= 5) return `${cleaned.slice(0, 2)} ${cleaned.slice(2)}`;
-    if (cleaned.length <= 7) return `${cleaned.slice(0, 2)} ${cleaned.slice(2, 5)} ${cleaned.slice(5)}`;
-    if (cleaned.length <= 9) return `${cleaned.slice(0, 2)} ${cleaned.slice(2, 5)} ${cleaned.slice(5, 7)} ${cleaned.slice(7)}`;
-    return `${cleaned.slice(0, 2)} ${cleaned.slice(2, 5)} ${cleaned.slice(5, 7)} ${cleaned.slice(7, 9)}`;
+    // Format as Belgian mobile number: 04XX XX XX XX
+    if (cleaned.length <= 4) return cleaned;
+    if (cleaned.length <= 6) return `${cleaned.slice(0, 4)} ${cleaned.slice(4)}`;
+    if (cleaned.length <= 8) return `${cleaned.slice(0, 4)} ${cleaned.slice(4, 6)} ${cleaned.slice(6)}`;
+    return `${cleaned.slice(0, 4)} ${cleaned.slice(4, 6)} ${cleaned.slice(6, 8)} ${cleaned.slice(8, 10)}`;
+  };
+
+  const validatePhoneNumber = (number: string) => {
+    // Belgian mobile number format: 04XX XX XX XX
+    const cleanedNumber = number.replace(/\s/g, '');
+    const belgianMobileRegex = /^0(4\d{8}|[1-9]\d{7})$/;
+    return belgianMobileRegex.test(cleanedNumber);
   };
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatPhoneNumber(e.target.value);
-    if (formatted.length <= 14) { // +32 XXX XX XX XX = 14 characters
+    if (formatted.length <= 13) { // 04XX XX XX XX = 13 characters
       setPhoneNumber(formatted);
       
-      // Validate when complete
-      if (formatted.length === 14) {
-        const isValid = /^\d{2} \d{3} \d{2} \d{2}$/.test(formatted);
-        setError(isValid ? '' : 'Numéro de téléphone invalide');
+      if (formatted.length > 0) {
+        const isValid = validatePhoneNumber(formatted);
+        setError(isValid ? '' : 'Numéro de téléphone belge invalide (ex: 0470 12 34 56)');
       } else {
         setError('');
       }
@@ -46,7 +51,7 @@ const ContactForm: React.FC<ContactFormProps> = ({ onSubmit, onBack, location })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!error) {
+    if (!error && validatePhoneNumber(phoneNumber)) {
       onSubmit({
         phoneNumber: phoneNumber,
       });
@@ -58,12 +63,11 @@ const ContactForm: React.FC<ContactFormProps> = ({ onSubmit, onBack, location })
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <div className="flex items-center space-x-2 bg-gray-800 border border-gray-600 rounded-lg p-3">
-            <span className="text-white">+32</span>
             <input
               type="tel"
               value={phoneNumber}
               onChange={handlePhoneChange}
-              placeholder="XXX XX XX XX"
+              placeholder="0470 12 34 56"
               className="flex-1 bg-transparent text-white outline-none placeholder-gray-400"
               required
             />
@@ -83,8 +87,8 @@ const ContactForm: React.FC<ContactFormProps> = ({ onSubmit, onBack, location })
           </button>
           <button
             type="submit"
-            className="flex-1 bg-primary-600 text-white py-3 rounded-lg hover:bg-primary-700 transition-colors"
-            disabled={!!error || !phoneNumber}
+            className="flex-1 bg-accent-500 text-white py-3 rounded-lg hover:bg-accent-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!phoneNumber || !!error}
           >
             Continuer
           </button>
