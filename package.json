@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "create-test-accounts": "ts-node scripts/createTestAccounts.ts"
   },
   "dependencies": {
     "@headlessui/react": "1.7.17",
@@ -15,6 +16,7 @@
     "next": "13.4.19",
     "react": "18.2.0",
     "react-dom": "18.2.0",
+    "react-hot-toast": "^2.4.1",
     "react-icons": "4.11.0",
     "zustand": "^5.0.1"
   },
@@ -24,10 +26,12 @@
     "@types/react": "18.2.24",
     "@types/react-dom": "18.2.8",
     "autoprefixer": "10.4.16",
+    "dotenv": "^16.4.5",
     "eslint": "^9.15.0",
     "eslint-config-next": "^15.0.3",
     "postcss": "8.4.31",
     "tailwindcss": "3.3.3",
+    "ts-node": "^10.9.2",
     "typescript": "5.2.2"
   }
 }

@@ -12,9 +12,10 @@ interface BreakdownFormProps {
     lng: number;
     address: string;
   };
+  vehicleType: string;
 }
 
-const BreakdownForm: React.FC<BreakdownFormProps> = ({ onSubmit, onBack, location }) => {
+const BreakdownForm: React.FC<BreakdownFormProps> = ({ onSubmit, onBack, location, vehicleType }) => {
   const [breakdownType, setBreakdownType] = useState('');
   const [description, setDescription] = useState('');
 

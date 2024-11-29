@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
-import AdminRoute from '@/components/auth/AdminRoute';
+import ProtectedRoute from '@/components/auth/AdminRoute';
 import Layout from '@/components/layout/Layout';
 
 interface Request {
@@ -35,7 +35,7 @@ const Dashboard: NextPage = () => {
   const { user } = useAuth();
 
   useEffect(() => {
-    if (!user?.isAdmin) return;
+    if (!user) return;
 
     const requestsRef = collection(db, 'requests');
     const q = query(requestsRef, orderBy('timestamp', 'desc'));
@@ -54,12 +54,12 @@ const Dashboard: NextPage = () => {
   }, [user]);
 
   return (
-    <AdminRoute>
+    <ProtectedRoute requiredRole="dispatcher">
       <Layout>
         <div className="min-h-screen bg-black text-white py-12">
           <div className="container mx-auto px-4">
             <div className="flex justify-between items-center mb-8">
-              <h1 className="text-3xl font-bold">Tableau de bord administrateur</h1>
+              <h1 className="text-3xl font-bold">Tableau de bord {user?.role}</h1>
             </div>
 
             {/* Synthflow Widget */}
@@ -129,14 +129,14 @@ const Dashboard: NextPage = () => {
                         </p>
                       </div>
                       <div className="flex space-x-3">
-                        {request.status === 'pending' && (
+                        {request.status === 'pending' && user?.role !== 'mechanic' && (
                           <button
                             className="px-4 py-2 bg-accent-500 text-white rounded-lg hover:bg-accent-600 transition-colors"
                           >
                             Accepter
                           </button>
                         )}
-                        {request.status === 'accepted' && (
+                        {request.status === 'accepted' && user?.role === 'mechanic' && (
                           <button
                             className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
                           >
@@ -158,7 +158,7 @@ const Dashboard: NextPage = () => {
           </div>
         </div>
       </Layout>
-    </AdminRoute>
+    </ProtectedRoute>
   );
 };
 

@@ -6,6 +6,10 @@ import BreakdownForm from '../breakdown/BreakdownForm';
 import ContactForm from '../contact/ContactForm';
 import WaitingScreen from '../waiting/WaitingScreen';
 import ProgressSteps from '../progress/ProgressSteps';
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '@/config/firebase';
+import { useAuth } from '@/hooks/useAuth';
+import { toast } from 'react-hot-toast';
 
 interface Location {
   lat: number;
@@ -21,6 +25,7 @@ interface Suggestion {
 const libraries: ["places"] = ["places"];
 
 const SearchBar = () => {
+  const { user } = useAuth();
   const { isLoaded, loadError } = useLoadScript({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
     libraries,
@@ -36,6 +41,7 @@ const SearchBar = () => {
   const [vehicleData, setVehicleData] = useState<any>(null);
   const [breakdownData, setBreakdownData] = useState<any>(null);
   const [contactData, setContactData] = useState<any>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     let autocompleteService: google.maps.places.AutocompleteService | null = null;
@@ -156,13 +162,32 @@ const SearchBar = () => {
     setCurrentStep(3);
   };
 
-  const handleContactSubmit = (data: { phoneNumber: string }) => {
-    setContactData(data);
-    setCurrentStep(4);
-  };
+  const handleContactSubmit = async (data: { phoneNumber: string }) => {
+    setIsSubmitting(true);
+    try {
+      // Créer la demande d'aide dans Firestore
+      await addDoc(collection(db, 'helpRequests'), {
+        userId: user?.uid || 'anonymous',
+        userEmail: user?.email || 'anonymous',
+        userPhone: data.phoneNumber,
+        location: selectedLocation,
+        vehicleType: vehicleData.type,
+        breakdownType: breakdownData.type,
+        description: breakdownData.description,
+        status: 'pending',
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
 
-  const handleBack = () => {
-    setCurrentStep(currentStep - 1);
+      setContactData(data);
+      setCurrentStep(4);
+      toast.success('Votre demande a été envoyée avec succès !');
+    } catch (error) {
+      console.error('Error creating help request:', error);
+      toast.error('Une erreur est survenue lors de l\'envoi de votre demande');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   useEffect(() => {
@@ -236,16 +261,18 @@ const SearchBar = () => {
         return (
           <BreakdownForm
             onSubmit={handleBreakdownSubmit}
-            onBack={handleBack}
+            onBack={() => setCurrentStep(1)}
             location={selectedLocation}
+            vehicleType={vehicleData.type}
           />
         );
       case 3:
         return (
           <ContactForm
             onSubmit={handleContactSubmit}
-            onBack={handleBack}
+            onBack={() => setCurrentStep(2)}
             location={selectedLocation}
+            isSubmitting={isSubmitting}
           />
         );
       case 4:

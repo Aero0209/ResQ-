@@ -1,22 +1,20 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/hooks/useAuth';
-import { UserRole } from '@/types/auth';
 
-interface ProtectedRouteProps {
+interface MechanicRouteProps {
   children: React.ReactNode;
-  requiredRole: UserRole;
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole }) => {
-  const { user, loading, hasAccess } = useAuth();
+const MechanicRoute: React.FC<MechanicRouteProps> = ({ children }) => {
+  const { user, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && (!user || !hasAccess(user.role, requiredRole))) {
+    if (!loading && (!user || user.role !== 'mechanic')) {
       router.replace('/login');
     }
-  }, [user, loading, router, requiredRole, hasAccess]);
+  }, [user, loading, router]);
 
   if (loading) {
     return (
@@ -26,11 +24,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole 
     );
   }
 
-  if (!user || !hasAccess(user.role, requiredRole)) {
+  if (!user || user.role !== 'mechanic') {
     return null;
   }
 
   return <>{children}</>;
 };
 
-export default ProtectedRoute; 
+export default MechanicRoute; 

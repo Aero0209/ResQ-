@@ -1,127 +1,116 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
-import { useAuthStore } from '@/store/useStore';
-import { FaBars, FaTimes, FaUser } from 'react-icons/fa';
+import { useRouter } from 'next/router';
+import { useAuth } from '@/hooks/useAuth';
+import { FaUser, FaTools, FaCog, FaHeadset } from 'react-icons/fa';
 
 const Navbar: React.FC = () => {
-  const { user } = useAuthStore();
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const router = useRouter();
+  const { user, logout } = useAuth();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      router.push('/');
+    } catch (error) {
+      console.error('Erreur lors de la déconnexion:', error);
+    }
+  };
+
+  const getDashboardLink = () => {
+    if (!user) return null;
+
+    switch (user.role) {
+      case 'admin':
+        return {
+          href: '/admin/dashboard',
+          icon: <FaCog className="w-5 h-5" />,
+          text: 'Admin'
+        };
+      case 'mechanic':
+        return {
+          href: '/mechanic/dashboard',
+          icon: <FaTools className="w-5 h-5" />,
+          text: 'Demandes'
+        };
+      case 'dispatcher':
+        return {
+          href: '/dispatcher/dashboard',
+          icon: <FaHeadset className="w-5 h-5" />,
+          text: 'Dispatch'
+        };
+      default:
+        return null;
+    }
+  };
+
+  const dashboardLink = getDashboardLink();
 
   return (
-    <nav className="bg-black text-white shadow-lg">
+    <nav className="bg-black text-white">
       <div className="max-w-7xl mx-auto px-4">
-        <div className="flex justify-between h-16">
-          {/* Logo and Brand */}
-          <div className="flex items-center">
-            <Link href="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
-              <span className="logo-text text-3xl font-black text-white">
-                ResQ
-              </span>
-            </Link>
-          </div>
+        <div className="flex justify-between items-center h-16">
+          {/* Logo */}
+          <Link href="/" className="logo-text text-2xl font-bold">
+            ResQ
+          </Link>
 
-          {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-8">
-            <Link 
-              href="/services" 
-              className="text-gray-300 hover:text-white hover:bg-gray-800 px-3 py-2 rounded-lg transition-colors"
-            >
-              Services
-            </Link>
-            <Link 
-              href="/about" 
-              className="text-gray-300 hover:text-white hover:bg-gray-800 px-3 py-2 rounded-lg transition-colors"
-            >
-              À propos
-            </Link>
+          {/* Navigation Links */}
+          <div className="flex items-center space-x-4">
             {user ? (
-              <Link 
-                href="/dashboard" 
-                className="flex items-center space-x-2 bg-accent-500 text-white px-4 py-2 rounded-lg hover:bg-accent-600 transition-colors"
-              >
-                <FaUser />
-                <span>Mon compte</span>
-              </Link>
+              <>
+                {/* User Info */}
+                <div className="flex items-center space-x-2 text-sm">
+                  <FaUser className="text-accent-500" />
+                  <span className="text-gray-300">
+                    {user.displayName || user.email}
+                    <span className="ml-2 px-2 py-1 bg-accent-500 text-white rounded-full text-xs">
+                      {user.role}
+                    </span>
+                  </span>
+                </div>
+
+                {/* Dashboard Link */}
+                {dashboardLink && (
+                  <Link
+                    href={dashboardLink.href}
+                    className={`flex items-center space-x-2 px-4 py-2 rounded-md text-sm transition-colors ${
+                      router.pathname.startsWith(dashboardLink.href)
+                        ? 'bg-accent-500 text-white'
+                        : 'text-gray-300 hover:text-white hover:bg-accent-500'
+                    }`}
+                  >
+                    {dashboardLink.icon}
+                    <span>{dashboardLink.text}</span>
+                  </Link>
+                )}
+
+                {/* Logout Button */}
+                <button
+                  onClick={handleLogout}
+                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm transition-colors"
+                >
+                  Déconnexion
+                </button>
+              </>
             ) : (
-              <div className="flex items-center space-x-4">
-                <Link 
-                  href="/login" 
-                  className="text-white hover:text-accent-400 transition-colors"
+              <>
+                <Link
+                  href="/login"
+                  className="bg-accent-500 hover:bg-accent-600 text-white px-4 py-2 rounded-md text-sm transition-colors"
                 >
                   Connexion
                 </Link>
-                <Link 
-                  href="/register" 
-                  className="bg-accent-500 text-white px-4 py-2 rounded-lg hover:bg-accent-600 transition-colors"
+                <Link
+                  href="/register"
+                  className="border border-accent-500 text-accent-500 hover:bg-accent-500 hover:text-white px-4 py-2 rounded-md text-sm transition-colors"
                 >
-                  S'inscrire
+                  Inscription
                 </Link>
-              </div>
+              </>
             )}
           </div>
-
-          {/* Mobile Menu Button */}
-          <div className="md:hidden flex items-center">
-            <button
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="text-gray-300 hover:text-white focus:outline-none"
-            >
-              {isMenuOpen ? (
-                <FaTimes className="h-6 w-6" />
-              ) : (
-                <FaBars className="h-6 w-6" />
-              )}
-            </button>
-          </div>
         </div>
-
-        {/* Mobile Menu */}
-        {isMenuOpen && (
-          <div className="md:hidden">
-            <div className="px-2 pt-2 pb-3 space-y-1">
-              <Link 
-                href="/services"
-                className="block text-gray-300 hover:text-white hover:bg-gray-800 px-3 py-2 rounded-lg transition-colors"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                Services
-              </Link>
-              <Link 
-                href="/about"
-                className="block text-gray-300 hover:text-white hover:bg-gray-800 px-3 py-2 rounded-lg transition-colors"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                À propos
-              </Link>
-              {user ? (
-                <Link 
-                  href="/dashboard"
-                  className="block bg-accent-500 text-white px-3 py-2 rounded-lg hover:bg-accent-600 transition-colors"
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  Mon compte
-                </Link>
-              ) : (
-                <>
-                  <Link 
-                    href="/login"
-                    className="block text-gray-300 hover:text-white hover:bg-gray-800 px-3 py-2 rounded-lg transition-colors"
-                    onClick={() => setIsMenuOpen(false)}
-                  >
-                    Connexion
-                  </Link>
-                  <Link 
-                    href="/register"
-                    className="block bg-accent-500 text-white px-3 py-2 rounded-lg hover:bg-accent-600 transition-colors"
-                    onClick={() => setIsMenuOpen(false)}
-                  >
-                    S'inscrire
-                  </Link>
-                </>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </nav>
   );

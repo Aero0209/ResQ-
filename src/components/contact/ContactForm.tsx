@@ -11,9 +11,10 @@ interface ContactFormProps {
     lng: number;
     address: string;
   };
+  isSubmitting?: boolean;
 }
 
-const ContactForm: React.FC<ContactFormProps> = ({ onSubmit, onBack, location }) => {
+const ContactForm: React.FC<ContactFormProps> = ({ onSubmit, onBack, location, isSubmitting = false }) => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [error, setError] = useState('');
 
@@ -70,6 +71,7 @@ const ContactForm: React.FC<ContactFormProps> = ({ onSubmit, onBack, location })
               placeholder="0470 12 34 56"
               className="flex-1 bg-transparent text-white outline-none placeholder-gray-400"
               required
+              disabled={isSubmitting}
             />
           </div>
           {error && (
@@ -81,16 +83,17 @@ const ContactForm: React.FC<ContactFormProps> = ({ onSubmit, onBack, location })
           <button
             type="button"
             onClick={onBack}
-            className="flex-1 bg-gray-700 text-white py-3 rounded-lg hover:bg-gray-600 transition-colors"
+            className="flex-1 bg-gray-700 text-white py-3 rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
+            disabled={isSubmitting}
           >
             Retour
           </button>
           <button
             type="submit"
             className="flex-1 bg-accent-500 text-white py-3 rounded-lg hover:bg-accent-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={!phoneNumber || !!error}
+            disabled={!phoneNumber || !!error || isSubmitting}
           >
-            Continuer
+            {isSubmitting ? 'Envoi en cours...' : 'Continuer'}
           </button>
         </div>
       </form>

@@ -8,14 +8,22 @@ import {
   onAuthStateChanged,
   User
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '@/config/firebase';
+import { UserData, UserRole } from '@/types/auth';
 
-interface UserData {
-  uid: string;
-  email: string | null;
-  isAdmin: boolean;
-}
+// Fonction utilitaire pour vérifier si un rôle a accès au dashboard
+export const hasAccess = (role: UserRole, requiredRole: UserRole): boolean => {
+  const roleHierarchy: Record<UserRole, number> = {
+    'admin': 4,
+    'owner': 3,
+    'dispatcher': 2,
+    'mechanic': 1,
+    'user': 0
+  };
+
+  return roleHierarchy[role] >= roleHierarchy[requiredRole];
+};
 
 export const useAuth = () => {
   const [user, setUser] = useState<UserData | null>(null);
@@ -26,8 +34,9 @@ export const useAuth = () => {
       if (firebaseUser) {
         const userData = await getUserData(firebaseUser);
         setUser(userData);
-        // Store user data in localStorage
-        localStorage.setItem('userData', JSON.stringify(userData));
+        // Store user data in localStorage with encryption
+        const encryptedData = btoa(JSON.stringify(userData)); // Simple encoding, you might want to use a more secure encryption
+        localStorage.setItem('userData', encryptedData);
       } else {
         setUser(null);
         localStorage.removeItem('userData');
@@ -35,10 +44,16 @@ export const useAuth = () => {
       setLoading(false);
     });
 
-    // Check localStorage on mount
-    const storedUser = localStorage.getItem('userData');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
+    // Check localStorage on mount with decryption
+    const encryptedData = localStorage.getItem('userData');
+    if (encryptedData) {
+      try {
+        const decryptedData = JSON.parse(atob(encryptedData));
+        setUser(decryptedData);
+      } catch (error) {
+        console.error('Error decoding user data:', error);
+        localStorage.removeItem('userData');
+      }
     }
 
     return () => unsubscribe();
@@ -48,22 +63,37 @@ export const useAuth = () => {
     const userRef = doc(db, 'users', firebaseUser.uid);
     const userDoc = await getDoc(userRef);
     
-    let isAdmin = false;
+    const now = Date.now();
+    
     if (userDoc.exists()) {
-      isAdmin = userDoc.data().isAdmin === true;
-    } else {
-      await setDoc(userRef, {
+      const data = userDoc.data();
+      // Update lastLogin
+      await setDoc(userRef, { lastLogin: now }, { merge: true });
+      
+      return {
         uid: firebaseUser.uid,
         email: firebaseUser.email,
-        isAdmin: false
-      });
-    }
+        role: data.role,
+        displayName: data.displayName || firebaseUser.displayName || undefined,
+        phoneNumber: data.phoneNumber || firebaseUser.phoneNumber || undefined,
+        createdAt: data.createdAt || now,
+        lastLogin: now
+      };
+    } else {
+      // Nouvel utilisateur
+      const newUser: UserData = {
+        uid: firebaseUser.uid,
+        email: firebaseUser.email,
+        role: 'user', // Rôle par défaut
+        displayName: firebaseUser.displayName || undefined,
+        phoneNumber: firebaseUser.phoneNumber || undefined,
+        createdAt: now,
+        lastLogin: now
+      };
 
-    return {
-      uid: firebaseUser.uid,
-      email: firebaseUser.email,
-      isAdmin: isAdmin
-    };
+      await setDoc(userRef, newUser);
+      return newUser;
+    }
   };
 
   const signInWithGoogle = async () => {
@@ -116,12 +146,18 @@ export const useAuth = () => {
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
-    logout
+    logout,
+    hasAccess
   };
 };
 
-export const checkAuth = () => {
-  const userData = localStorage.getItem('userData');
-  if (!userData) return null;
-  return JSON.parse(userData) as UserData;
+export const checkAuth = (): UserData | null => {
+  const encryptedData = localStorage.getItem('userData');
+  if (!encryptedData) return null;
+  try {
+    return JSON.parse(atob(encryptedData)) as UserData;
+  } catch {
+    localStorage.removeItem('userData');
+    return null;
+  }
 }; 

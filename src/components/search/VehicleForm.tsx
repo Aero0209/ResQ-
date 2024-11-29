@@ -1,18 +1,28 @@
 import React, { useState } from 'react';
-import LocationMap from '../map/LocationMap';
+import { FaCar, FaTruck, FaMotorcycle, FaShuttleVan, FaQuestion } from 'react-icons/fa';
 
 interface VehicleFormProps {
-  onSubmit: (vehicleData: {
-    type: string;
-    brand: string;
-    licensePlate: string;
-  }) => void;
+  onSubmit: (data: { type: string; brand: string; licensePlate: string }) => void;
   location: {
     lat: number;
     lng: number;
     address: string;
   };
 }
+
+interface VehicleType {
+  id: string;
+  label: string;
+  Icon: React.ComponentType<{ className?: string }>;
+}
+
+const vehicleTypes: VehicleType[] = [
+  { id: 'voiture', label: 'Voiture', Icon: FaCar },
+  { id: 'moto', label: 'Moto', Icon: FaMotorcycle },
+  { id: 'camionnette', label: 'Camionnette', Icon: FaShuttleVan },
+  { id: 'camion', label: 'Camion', Icon: FaTruck },
+  { id: 'autre', label: 'Autre', Icon: FaQuestion },
+];
 
 const VehicleForm: React.FC<VehicleFormProps> = ({ onSubmit, location }) => {
   const [vehicleType, setVehicleType] = useState('');
@@ -65,20 +75,26 @@ const VehicleForm: React.FC<VehicleFormProps> = ({ onSubmit, location }) => {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-6">
       <div>
-        <select
-          value={vehicleType}
-          onChange={(e) => setVehicleType(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-600 rounded-lg p-3 text-white [&>option]:text-black"
-          required
-        >
-          <option value="" disabled>Type de véhicule</option>
-          <option value="car">Voiture</option>
-          <option value="motorcycle">Moto</option>
-          <option value="van">Camionnette</option>
-          <option value="truck">Camion</option>
-        </select>
+        <label className="block text-white mb-2">Type de véhicule</label>
+        <div className="grid grid-cols-3 gap-3">
+          {vehicleTypes.map((type) => (
+            <button
+              key={type.id}
+              type="button"
+              onClick={() => setVehicleType(type.id)}
+              className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all ${
+                vehicleType === type.id
+                  ? 'border-accent-500 bg-accent-500/20'
+                  : 'border-gray-600 hover:border-accent-500/50'
+              }`}
+            >
+              <type.Icon className="w-8 h-8 mb-2" />
+              <span className="text-sm">{type.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div>
@@ -99,7 +115,7 @@ const VehicleForm: React.FC<VehicleFormProps> = ({ onSubmit, location }) => {
           <option value="toyota">Toyota</option>
           <option value="honda">Honda</option>
           <option value="ford">Ford</option>
-          <option value="other">Autre</option>
+          <option value="autre">Autre</option>
         </select>
       </div>
 
@@ -126,12 +142,6 @@ const VehicleForm: React.FC<VehicleFormProps> = ({ onSubmit, location }) => {
       >
         Continuer
       </button>
-
-      <div className="mt-4 p-4 bg-gray-800 rounded-lg">
-        <p className="text-white mb-2">Position sélectionnée :</p>
-        <p className="text-gray-400 text-sm mb-4">{location.address}</p>
-        <LocationMap center={{ lat: location.lat, lng: location.lng }} />
-      </div>
     </form>
   );
 };

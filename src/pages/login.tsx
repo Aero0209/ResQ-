@@ -1,157 +1,161 @@
 import { useState } from 'react';
-import { NextPage } from 'next';
 import { useRouter } from 'next/router';
-import Link from 'next/link';
-import { FaGoogle } from 'react-icons/fa';
 import { useAuth } from '@/hooks/useAuth';
-import Layout from '@/components/layout/Layout';
-import { FirebaseError } from 'firebase/app';
+import { UserRole } from '@/types/auth';
 
-const Login: NextPage = () => {
+export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const router = useRouter();
   const { signInWithEmail, signInWithGoogle } = useAuth();
+  const router = useRouter();
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
-
     try {
       const userData = await signInWithEmail(email, password);
-      if (userData.isAdmin) {
+      if (userData.role === 'admin') {
         router.push('/admin/dashboard');
       } else {
         router.push('/');
       }
     } catch (err) {
-      if (err instanceof FirebaseError) {
-        switch (err.code) {
-          case 'auth/user-not-found':
-          case 'auth/wrong-password':
-            setError('Email ou mot de passe incorrect');
-            break;
-          case 'auth/too-many-requests':
-            setError('Trop de tentatives. Veuillez réessayer plus tard');
-            break;
-          default:
-            setError('Une erreur est survenue lors de la connexion');
-        }
-      } else {
-        setError('Une erreur est survenue lors de la connexion');
-      }
-    } finally {
-      setLoading(false);
+      setError('Échec de la connexion. Vérifiez vos identifiants.');
     }
   };
 
   const handleGoogleLogin = async () => {
-    setError('');
-    setLoading(true);
-
     try {
       const userData = await signInWithGoogle();
-      if (userData.isAdmin) {
+      if (userData.role === 'admin') {
         router.push('/admin/dashboard');
       } else {
         router.push('/');
       }
     } catch (err) {
-      if (err instanceof FirebaseError) {
-        setError('Erreur lors de la connexion avec Google');
+      setError('Échec de la connexion avec Google.');
+    }
+  };
+
+  const quickLogin = async (role: UserRole) => {
+    const testAccounts = {
+      admin: { email: 'admin@resq.com', password: 'testadmin123' },
+      owner: { email: 'owner@resq.com', password: 'testowner123' },
+      dispatcher: { email: 'dispatcher@resq.com', password: 'testdispatcher123' },
+      mechanic: { email: 'mechanic@resq.com', password: 'testmechanic123' },
+      user: { email: 'user@resq.com', password: 'testuser123' },
+    };
+
+    try {
+      const account = testAccounts[role];
+      const userData = await signInWithEmail(account.email, account.password);
+      if (userData.role === 'admin') {
+        router.push('/admin/dashboard');
       } else {
-        setError('Une erreur est survenue lors de la connexion');
+        router.push('/');
       }
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      setError(`Échec de la connexion rapide pour le rôle ${role}`);
     }
   };
 
   return (
-    <Layout>
-      <div className="min-h-screen bg-black">
-        <div className="container mx-auto px-4 py-20">
-          <div className="max-w-md mx-auto bg-gray-900 rounded-lg shadow-lg p-8">
-            <h1 className="text-3xl font-bold text-white mb-8 text-center">Connexion</h1>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8">
+        <div>
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+            Connexion à votre compte
+          </h2>
+        </div>
+        
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+            <span className="block sm:inline">{error}</span>
+          </div>
+        )}
 
-            <form onSubmit={handleEmailLogin} className="space-y-6">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-300">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="mt-1 block w-full bg-gray-800 border border-gray-600 rounded-lg p-3 text-white placeholder-gray-400"
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-300">
-                  Mot de passe
-                </label>
-                <input
-                  type="password"
-                  id="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="mt-1 block w-full bg-gray-800 border border-gray-600 rounded-lg p-3 text-white placeholder-gray-400"
-                  required
-                />
-              </div>
-
-              {error && (
-                <div className="text-red-500 text-sm">
-                  {error}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-accent-500 text-white py-3 rounded-lg hover:bg-accent-600 transition-colors disabled:opacity-50"
-              >
-                {loading ? 'Connexion...' : 'Se connecter'}
-              </button>
-            </form>
-
-            <div className="mt-6">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-600"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-gray-900 text-gray-400">Ou continuer avec</span>
-                </div>
-              </div>
-
-              <button
-                onClick={handleGoogleLogin}
-                disabled={loading}
-                className="mt-4 w-full bg-white text-gray-900 py-3 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50"
-              >
-                <FaGoogle />
-                <span>Google</span>
-              </button>
+        <form className="mt-8 space-y-6" onSubmit={handleEmailLogin}>
+          <div className="rounded-md shadow-sm -space-y-px">
+            <div>
+              <input
+                type="email"
+                required
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-accent-500 focus:border-accent-500 focus:z-10 sm:text-sm"
+                placeholder="Adresse email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
+            <div>
+              <input
+                type="password"
+                required
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-accent-500 focus:border-accent-500 focus:z-10 sm:text-sm"
+                placeholder="Mot de passe"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          </div>
 
-            <p className="mt-8 text-center text-gray-400">
-              Pas encore de compte ?{' '}
-              <Link href="/register" className="text-accent-500 hover:text-accent-400">
-                S&apos;inscrire
-              </Link>
-            </p>
+          <div>
+            <button
+              type="submit"
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-accent-600 hover:bg-accent-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500"
+            >
+              Se connecter
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-6">
+          <button
+            onClick={handleGoogleLogin}
+            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+          >
+            Se connecter avec Google
+          </button>
+        </div>
+
+        <div className="mt-8">
+          <h3 className="text-center text-lg font-medium text-gray-900 mb-4">
+            Connexions rapides (Test)
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => quickLogin('admin')}
+              className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700"
+            >
+              Admin
+            </button>
+            <button
+              onClick={() => quickLogin('owner')}
+              className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+            >
+              Propriétaire
+            </button>
+            <button
+              onClick={() => quickLogin('dispatcher')}
+              className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700"
+            >
+              Dispatcher
+            </button>
+            <button
+              onClick={() => quickLogin('mechanic')}
+              className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700"
+            >
+              Mécanicien
+            </button>
+            <button
+              onClick={() => quickLogin('user')}
+              className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-gray-600 hover:bg-gray-700 col-span-2"
+            >
+              Utilisateur
+            </button>
           </div>
         </div>
       </div>
-    </Layout>
+    </div>
   );
-};
-
-export default Login; 
+} 

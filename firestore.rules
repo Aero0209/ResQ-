@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Fonction pour vérifier si l'utilisateur est authentifié
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Fonction pour vérifier le rôle de l'utilisateur
+    function hasRole(role) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+
+    // Règles pour la collection users
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || hasRole('admin'));
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Règles pour la collection helpRequests
+    match /helpRequests/{requestId} {
+      // Tout le monde peut créer une demande d'aide
+      allow create: if true;
+      
+      // Les mécaniciens peuvent lire toutes les demandes
+      allow read: if hasRole('mechanic') || hasRole('admin') || hasRole('dispatcher');
+      
+      // Les mécaniciens peuvent mettre à jour les demandes
+      allow update: if hasRole('mechanic') && (
+        // Peut accepter une nouvelle demande
+        (resource.data.status == 'pending' && request.resource.data.status == 'accepted') ||
+        // Peut refuser une demande
+        (resource.data.status == 'pending' && request.resource.data.status == 'rejected') ||
+        // Peut mettre à jour une demande qu'il a acceptée
+        (resource.data.mechanicId == request.auth.uid)
+      );
+    }
+  }
+} 
