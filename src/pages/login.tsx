@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { FaGoogle } from 'react-icons/fa';
 import { useAuth } from '@/hooks/useAuth';
 import Layout from '@/components/layout/Layout';
+import { FirebaseError } from 'firebase/app';
 
 const Login: NextPage = () => {
   const [email, setEmail] = useState('');
@@ -21,18 +22,27 @@ const Login: NextPage = () => {
 
     try {
       const userData = await signInWithEmail(email, password);
-      console.log('Login successful, user data:', userData);
-      
       if (userData.isAdmin) {
-        console.log('User is admin, redirecting to dashboard');
-        await router.push('/admin/dashboard');
+        router.push('/admin/dashboard');
       } else {
-        console.log('User is not admin, redirecting to home');
-        await router.push('/');
+        router.push('/');
       }
-    } catch (err: any) {
-      console.error('Login error:', err);
-      setError(err.message || 'Une erreur est survenue lors de la connexion');
+    } catch (err) {
+      if (err instanceof FirebaseError) {
+        switch (err.code) {
+          case 'auth/user-not-found':
+          case 'auth/wrong-password':
+            setError('Email ou mot de passe incorrect');
+            break;
+          case 'auth/too-many-requests':
+            setError('Trop de tentatives. Veuillez réessayer plus tard');
+            break;
+          default:
+            setError('Une erreur est survenue lors de la connexion');
+        }
+      } else {
+        setError('Une erreur est survenue lors de la connexion');
+      }
     } finally {
       setLoading(false);
     }
@@ -44,18 +54,17 @@ const Login: NextPage = () => {
 
     try {
       const userData = await signInWithGoogle();
-      console.log('Google login successful, user data:', userData);
-      
       if (userData.isAdmin) {
-        console.log('User is admin, redirecting to dashboard');
-        await router.push('/admin/dashboard');
+        router.push('/admin/dashboard');
       } else {
-        console.log('User is not admin, redirecting to home');
-        await router.push('/');
+        router.push('/');
       }
-    } catch (err: any) {
-      console.error('Google login error:', err);
-      setError(err.message || 'Une erreur est survenue lors de la connexion avec Google');
+    } catch (err) {
+      if (err instanceof FirebaseError) {
+        setError('Erreur lors de la connexion avec Google');
+      } else {
+        setError('Une erreur est survenue lors de la connexion');
+      }
     } finally {
       setLoading(false);
     }

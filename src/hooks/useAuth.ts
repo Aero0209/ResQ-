@@ -9,7 +9,7 @@ import {
   User
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { auth, db, ADMIN_UID } from '@/config/firebase';
+import { auth, db } from '@/config/firebase';
 
 interface UserData {
   uid: string;
@@ -48,29 +48,15 @@ export const useAuth = () => {
     const userRef = doc(db, 'users', firebaseUser.uid);
     const userDoc = await getDoc(userRef);
     
-    // Vérifier si l'utilisateur est admin en comparant avec ADMIN_UID
-    const isAdmin = firebaseUser.uid === ADMIN_UID;
-    
-    if (!userDoc.exists()) {
-      // Créer un nouveau document utilisateur
-      const userData = {
+    let isAdmin = false;
+    if (userDoc.exists()) {
+      isAdmin = userDoc.data().isAdmin === true;
+    } else {
+      await setDoc(userRef, {
         uid: firebaseUser.uid,
         email: firebaseUser.email,
-        isAdmin: isAdmin,
-        createdAt: new Date()
-      };
-      await setDoc(userRef, userData);
-      return {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        isAdmin: isAdmin
-      };
-    }
-
-    // Mettre à jour le statut admin si nécessaire
-    const existingData = userDoc.data();
-    if (existingData.isAdmin !== isAdmin) {
-      await setDoc(userRef, { ...existingData, isAdmin }, { merge: true });
+        isAdmin: false
+      });
     }
 
     return {
