@@ -22,7 +22,15 @@ service cloud.firestore {
 
     // Règles pour la collection users
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || hasRole('admin'));
+      // Permettre la lecture des informations des mécaniciens par tout le monde
+      allow read: if 
+        // L'utilisateur est le propriétaire du profil
+        request.auth.uid == userId ||
+        // Ou l'utilisateur est un admin
+        hasRole('admin') ||
+        // Ou c'est un profil de mécanicien
+        get(/databases/$(database)/documents/users/$(userId)).data.role == 'mechanic';
+        
       allow write: if isAuthenticated() && request.auth.uid == userId;
     }
 
@@ -32,7 +40,7 @@ service cloud.firestore {
       allow create: if true;
       
       // Lecture autorisée si :
-      // - L'utilisateur est le propriétaire de la demande (authentifié ou anonyme)
+      // - L'utilisateur est le propriétaire de la demande
       // - L'utilisateur est un mécanicien
       // - L'utilisateur est un admin
       // - L'utilisateur est un dispatcher

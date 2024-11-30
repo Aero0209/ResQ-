@@ -8,3 +8,13 @@
   font-family: 'Orbitron', sans-serif;
   letter-spacing: 2px;
 } 
+
+/* Styles pour les labels des marqueurs sur la carte */
+.map-marker-label {
+  background-color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  white-space: nowrap;
+  font-family: system-ui, -apple-system, sans-serif;
+} 

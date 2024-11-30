@@ -5,7 +5,7 @@ import { db } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import Layout from '@/components/layout/Layout';
 import MechanicRoute from '@/components/auth/MechanicRoute';
-import { GoogleMap, useLoadScript, Marker } from '@react-google-maps/api';
+import { GoogleMap, useLoadScript, Marker, DirectionsRenderer, Libraries } from '@react-google-maps/api';
 import { FaPhone, FaComment, FaMapMarkerAlt, FaCar, FaTools } from 'react-icons/fa';
 import { toast } from 'react-hot-toast';
 
@@ -31,17 +31,35 @@ interface RequestDetails {
   };
 }
 
+interface RouteInfo {
+  distance: string;
+  duration: string;
+}
+
+const libraries: Libraries = ['places'];
+
+const center = { lat: 50.8503, lng: 4.3517 }; // Brussels coordinates
+
+const mapContainerStyle = {
+  width: '100%',
+  height: '400px'
+};
+
 const RequestDetails = () => {
   const router = useRouter();
   const { id } = router.query;
   const { user } = useAuth();
   const [request, setRequest] = useState<RequestDetails | null>(null);
-  const [mechanicLocation, setMechanicLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
+  const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
   const [watchId, setWatchId] = useState<number | null>(null);
+  const [geoErrorCount, setGeoErrorCount] = useState(0);
+  const MAX_RETRY_ATTEMPTS = 5;
 
   const { isLoaded } = useLoadScript({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
-    libraries: ['places']
+    libraries
   });
 
   // Écouter les mises à jour de la demande
@@ -50,7 +68,32 @@ const RequestDetails = () => {
 
     const unsubscribe = onSnapshot(doc(db, 'helpRequests', id as string), (doc) => {
       if (doc.exists()) {
-        setRequest({ id: doc.id, ...doc.data() } as RequestDetails);
+        const data = doc.data();
+        const requestData = {
+          id: doc.id,
+          userId: data.userId,
+          userPhone: data.contactData?.phoneNumber || data.userPhone,
+          location: {
+            lat: data.location.lat,
+            lng: data.location.lng,
+            address: data.location.address
+          },
+          vehicleType: data.vehicleData?.type || data.vehicleType,
+          vehicleBrand: data.vehicleData?.brand || data.vehicleBrand,
+          vehicleLicensePlate: data.vehicleData?.licensePlate || data.vehicleLicensePlate,
+          breakdownType: data.breakdownData?.type || data.breakdownType,
+          description: data.breakdownData?.description || data.description,
+          status: data.status,
+          mechanicId: data.mechanicId,
+          mechanicLocation: data.mechanicLocation
+        };
+
+        setRequest(requestData);
+
+        // Si le statut est "accepted", on arrête d'écouter les mises à jour
+        if (data.status === 'accepted' && data.mechanicId === user.uid) {
+          unsubscribe();
+        }
       }
     });
 
@@ -62,9 +105,9 @@ const RequestDetails = () => {
     };
   }, [id, user]);
 
-  // Gérer le suivi de la position du mécanicien
+  // Gérer le suivi de la position actuelle
   useEffect(() => {
-    if (!request || !user || request.mechanicId !== user.uid) return;
+    if (!request || !user || request.mechanicId !== user.uid || !isLoaded || geoErrorCount >= MAX_RETRY_ATTEMPTS) return;
 
     if ('geolocation' in navigator) {
       const watchIdNum = navigator.geolocation.watchPosition(
@@ -73,9 +116,9 @@ const RequestDetails = () => {
             lat: position.coords.latitude,
             lng: position.coords.longitude
           };
-          setMechanicLocation(newLocation);
+          setCurrentLocation(newLocation);
+          setGeoErrorCount(0); // Réinitialiser le compteur d'erreurs en cas de succès
 
-          // Mettre à jour la position dans Firestore
           try {
             await updateDoc(doc(db, 'helpRequests', request.id), {
               mechanicLocation: newLocation,
@@ -87,7 +130,15 @@ const RequestDetails = () => {
         },
         (error) => {
           console.error('Erreur de géolocalisation:', error);
-          toast.error('Erreur lors du suivi de votre position');
+          setGeoErrorCount(prev => {
+            const newCount = prev + 1;
+            if (newCount >= MAX_RETRY_ATTEMPTS) {
+              toast.error('Impossible d\'obtenir votre position après plusieurs tentatives. Veuillez vérifier vos paramètres de localisation.');
+            } else {
+              toast.error(`Erreur de localisation (tentative ${newCount}/${MAX_RETRY_ATTEMPTS})`);
+            }
+            return newCount;
+          });
         },
         {
           enableHighAccuracy: true,
@@ -104,7 +155,31 @@ const RequestDetails = () => {
         navigator.geolocation.clearWatch(watchId);
       }
     };
-  }, [request, user]);
+  }, [request, user, isLoaded, geoErrorCount]);
+
+  // Calculer l'itinéraire
+  useEffect(() => {
+    if (!currentLocation || !request || !isLoaded) return;
+
+    const directionsService = new google.maps.DirectionsService();
+    directionsService.route(
+      {
+        origin: currentLocation,
+        destination: request.location,
+        travelMode: google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          setDirections(result);
+          const route = result.routes[0].legs[0];
+          setRouteInfo({
+            distance: route.distance?.text || '',
+            duration: route.duration?.text || ''
+          });
+        }
+      }
+    );
+  }, [currentLocation, request, isLoaded]);
 
   const handleCall = () => {
     if (request?.userPhone) {
@@ -150,32 +225,94 @@ const RequestDetails = () => {
           <div className="max-w-4xl mx-auto px-4">
             <div className="bg-white rounded-lg shadow-lg overflow-hidden">
               {/* Map Section */}
-              <div className="h-96 relative">
+              <div className="h-[400px] relative">
                 <GoogleMap
-                  mapContainerStyle={{ width: '100%', height: '100%' }}
-                  center={request.location}
+                  mapContainerStyle={mapContainerStyle}
                   zoom={13}
+                  center={request?.location || center}
+                  options={{
+                    zoomControl: true,
+                    streetViewControl: true,
+                    mapTypeControl: true,
+                    fullscreenControl: true
+                  }}
                 >
-                  {/* Marker pour le client */}
-                  <Marker
-                    position={request.location}
-                    icon={{
-                      url: '/icons/client-marker.png',
-                      scaledSize: new google.maps.Size(40, 40)
-                    }}
-                  />
-                  {/* Marker pour le mécanicien */}
-                  {mechanicLocation && (
+                  {/* Client location marker */}
+                  {request?.location && (
                     <Marker
-                      position={mechanicLocation}
+                      position={request.location}
                       icon={{
-                        url: '/icons/mechanic-marker.png',
-                        scaledSize: new google.maps.Size(40, 40)
+                        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                        fillColor: '#FF4B4B',
+                        fillOpacity: 1,
+                        strokeWeight: 2,
+                        strokeColor: '#FFFFFF',
+                        scale: 7,
+                        rotation: 180
+                      }}
+                      label={{
+                        text: 'Client',
+                        className: 'map-marker-label',
+                        color: '#FF4B4B',
+                        fontSize: '14px',
+                        fontWeight: 'bold'
+                      }}
+                    />
+                  )}
+
+                  {/* Current location marker */}
+                  {currentLocation && (
+                    <Marker
+                      position={currentLocation}
+                      icon={{
+                        path: google.maps.SymbolPath.CIRCLE,
+                        fillColor: '#4F46E5',
+                        fillOpacity: 1,
+                        strokeWeight: 2,
+                        strokeColor: '#FFFFFF',
+                        scale: 7
+                      }}
+                      label={{
+                        text: 'Ma position',
+                        className: 'map-marker-label',
+                        color: '#4F46E5',
+                        fontSize: '14px',
+                        fontWeight: 'bold'
+                      }}
+                    />
+                  )}
+                  
+                  {/* Show directions if available */}
+                  {directions && (
+                    <DirectionsRenderer
+                      directions={directions}
+                      options={{
+                        suppressMarkers: true,
+                        polylineOptions: {
+                          strokeColor: '#4F46E5',
+                          strokeWeight: 4
+                        }
                       }}
                     />
                   )}
                 </GoogleMap>
               </div>
+
+              {/* Route Info */}
+              {routeInfo && (
+                <div className="p-4 bg-gray-900 text-white">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="text-gray-400">Distance:</span>
+                      <span className="ml-2 font-semibold">{routeInfo.distance}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Temps estimé:</span>
+                      <span className="ml-2 font-semibold">{routeInfo.duration}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Informations Section */}
               <div className="p-6 space-y-6">

@@ -4,7 +4,7 @@ import LocationMap from '../map/LocationMap';
 import { db } from '@/config/firebase';
 import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
-import { GoogleMap, Marker } from '@react-google-maps/api';
+import { GoogleMap, Marker, Circle, Polyline, DirectionsRenderer } from '@react-google-maps/api';
 
 interface WaitingScreenProps {
   location: {
@@ -36,6 +36,11 @@ interface MechanicInfo {
   estimatedArrival: string;
 }
 
+interface RouteInfo {
+  distance: string;
+  duration: string;
+}
+
 const WaitingScreen: React.FC<WaitingScreenProps> = ({
   location,
   vehicleData,
@@ -48,7 +53,12 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
   const [elapsedTime, setElapsedTime] = useState(0);
   const [mechanicInfo, setMechanicInfo] = useState<MechanicInfo | null>(null);
   const [mechanicLocation, setMechanicLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
+  const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [geoErrorCount, setGeoErrorCount] = useState(0);
+  const MAX_RETRY_ATTEMPTS = 5;
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -68,24 +78,43 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
     const unsubscribe = onSnapshot(requestRef, async (docSnapshot) => {
       if (docSnapshot.exists()) {
         const data = docSnapshot.data();
+        
+        // Si la demande est complétée ou annulée, on arrête d'écouter
+        if (data.status === 'completed' || data.status === 'cancelled') {
+          unsubscribe();
+          return;
+        }
+
         if (data.mechanicId && data.status === 'accepted') {
           try {
-            const mechanicRef = doc(db, 'users', data.mechanicId);
-            const mechanicDoc = await getDoc(mechanicRef);
-            
-            if (mechanicDoc.exists()) {
-              const mechanicData = mechanicDoc.data();
-              setMechanicInfo({
-                name: data.mechanicName || mechanicData.name || 'Mécanicien',
-                phone: data.mechanicPhone || mechanicData.phone || 'Non disponible',
-                rating: mechanicData.rating || 4.5,
-                estimatedArrival: data.estimatedArrival || '15-20 minutes'
-              });
-            }
+            // Mettre à jour les informations de base du mécanicien depuis la demande
+            setMechanicInfo({
+              name: data.mechanicName || 'Mécanicien',
+              phone: data.mechanicPhone || 'Non disponible',
+              rating: 4.5,
+              estimatedArrival: data.estimatedArrival || '15-20 minutes'
+            });
 
             // Mettre à jour la position du mécanicien
             if (data.mechanicLocation) {
               setMechanicLocation(data.mechanicLocation);
+            }
+
+            // Récupérer les informations supplémentaires du mécanicien une seule fois
+            if (!mechanicInfo) {
+              const mechanicRef = doc(db, 'users', data.mechanicId);
+              const mechanicDoc = await getDoc(mechanicRef);
+              
+              if (mechanicDoc.exists()) {
+                const mechanicData = mechanicDoc.data();
+                setMechanicInfo(prev => ({
+                  ...prev!,
+                  rating: mechanicData.rating || prev!.rating,
+                  name: prev!.name,
+                  phone: prev!.phone,
+                  estimatedArrival: prev!.estimatedArrival
+                }));
+              }
             }
           } catch (error) {
             console.error('Erreur lors de la récupération des infos du mécanicien:', error);
@@ -96,6 +125,66 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
 
     return () => unsubscribe();
   }, [requestId]);
+
+  // Calculer l'itinéraire lorsque la position du mécanicien change
+  useEffect(() => {
+    if (!mechanicLocation || !isLoaded || status !== 'accepted') return;
+
+    const directionsService = new google.maps.DirectionsService();
+    directionsService.route(
+      {
+        origin: mechanicLocation,
+        destination: location,
+        travelMode: google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          setDirections(result);
+          const route = result.routes[0].legs[0];
+          setRouteInfo({
+            distance: route.distance?.text || '',
+            duration: route.duration?.text || ''
+          });
+        }
+      }
+    );
+  }, [mechanicLocation, location, isLoaded, status]);
+
+  // Suivre la position actuelle
+  useEffect(() => {
+    if (!isLoaded || geoErrorCount >= MAX_RETRY_ATTEMPTS) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setCurrentLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        });
+        setGeoErrorCount(0); // Réinitialiser le compteur d'erreurs en cas de succès
+      },
+      (error) => {
+        console.error('Erreur de géolocalisation:', error);
+        setGeoErrorCount(prev => {
+          const newCount = prev + 1;
+          if (newCount >= MAX_RETRY_ATTEMPTS) {
+            toast.error('Impossible d\'obtenir votre position après plusieurs tentatives. Veuillez vérifier vos paramètres de localisation.');
+          } else {
+            toast.error(`Erreur de localisation (tentative ${newCount}/${MAX_RETRY_ATTEMPTS})`);
+          }
+          return newCount;
+        });
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 10000,
+        timeout: 5000
+      }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [isLoaded, geoErrorCount]);
 
   const handleCancelRequest = async () => {
     if (!requestId || isCancelling) return;
@@ -126,6 +215,45 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
     return '★'.repeat(Math.floor(rating)) + '☆'.repeat(5 - Math.floor(rating));
   };
 
+  // Styles pour la carte
+  const mapStyles = {
+    height: '400px',
+    width: '100%'
+  };
+
+  const circleOptions = {
+    strokeColor: '#4F46E5',
+    strokeOpacity: 0.8,
+    strokeWeight: 2,
+    fillColor: '#4F46E5',
+    fillOpacity: 0.35,
+    radius: 100 // rayon en mètres
+  };
+
+  // Calculer le centre et le zoom de la carte pour montrer les deux positions
+  const getMapBounds = () => {
+    if (mechanicLocation) {
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend(location);
+      bounds.extend(mechanicLocation);
+      return bounds;
+    }
+    return null;
+  };
+
+  // Styles pour les marqueurs
+  const currentLocationIcon = {
+    url: '/icons/current-location.svg',
+    scaledSize: new google.maps.Size(40, 40),
+    anchor: new google.maps.Point(20, 20)
+  };
+
+  const mechanicMarkerIcon = {
+    url: '/icons/mechanic-marker.svg',
+    scaledSize: new google.maps.Size(40, 40),
+    anchor: new google.maps.Point(20, 20)
+  };
+
   if (!isLoaded) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -136,37 +264,126 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Map Section - Visible when accepted */}
-      {status === 'accepted' && (
-        <div className="bg-gray-800 rounded-lg overflow-hidden">
-          <div className="h-64 relative">
-            <GoogleMap
-              mapContainerStyle={{ width: '100%', height: '100%' }}
-              center={location}
-              zoom={13}
-            >
-              {/* Client Location Marker */}
+      {/* Map Section - Toujours visible */}
+      <div className="bg-gray-800 rounded-lg overflow-hidden">
+        <div className="h-[400px] relative">
+          <GoogleMap
+            mapContainerStyle={mapStyles}
+            center={currentLocation || location}
+            zoom={13}
+            options={{
+              styles: [
+                {
+                  featureType: 'all',
+                  elementType: 'all',
+                  stylers: [
+                    { saturation: -100 },
+                    { lightness: 0 }
+                  ]
+                }
+              ],
+              disableDefaultUI: true,
+              zoomControl: true,
+              streetViewControl: true,
+              fullscreenControl: true
+            }}
+          >
+            {/* Marqueur pour la position initiale */}
+            <Marker
+              position={location}
+              icon={{
+                path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                fillColor: '#FF4B4B',
+                fillOpacity: 1,
+                strokeWeight: 2,
+                strokeColor: '#FFFFFF',
+                scale: 7,
+                rotation: 180
+              }}
+              label={{
+                text: 'Position initiale',
+                className: 'map-marker-label',
+                color: '#FF4B4B',
+                fontSize: '14px',
+                fontWeight: 'bold'
+              }}
+            />
+
+            {/* Marqueur pour ma position actuelle */}
+            {currentLocation && (
               <Marker
-                position={location}
+                position={currentLocation}
                 icon={{
-                  url: '/icons/client-marker.png',
-                  scaledSize: new google.maps.Size(40, 40)
+                  path: google.maps.SymbolPath.CIRCLE,
+                  fillColor: '#4F46E5',
+                  fillOpacity: 1,
+                  strokeWeight: 2,
+                  strokeColor: '#FFFFFF',
+                  scale: 7
+                }}
+                label={{
+                  text: 'Ma position',
+                  className: 'map-marker-label',
+                  color: '#4F46E5',
+                  fontSize: '14px',
+                  fontWeight: 'bold'
                 }}
               />
-              {/* Mechanic Location Marker */}
-              {mechanicLocation && (
-                <Marker
-                  position={mechanicLocation}
-                  icon={{
-                    url: '/icons/mechanic-marker.png',
-                    scaledSize: new google.maps.Size(40, 40)
-                  }}
-                />
-              )}
-            </GoogleMap>
-          </div>
+            )}
+
+            {/* Marqueur pour le mécanicien */}
+            {status === 'accepted' && mechanicLocation && (
+              <Marker
+                position={mechanicLocation}
+                icon={{
+                  path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                  fillColor: '#10B981',
+                  fillOpacity: 1,
+                  strokeWeight: 2,
+                  strokeColor: '#FFFFFF',
+                  scale: 7
+                }}
+                label={{
+                  text: 'Dépanneur',
+                  className: 'map-marker-label',
+                  color: '#10B981',
+                  fontSize: '14px',
+                  fontWeight: 'bold'
+                }}
+              />
+            )}
+
+            {/* Afficher l'itinéraire */}
+            {directions && (
+              <DirectionsRenderer
+                directions={directions}
+                options={{
+                  suppressMarkers: true,
+                  polylineOptions: {
+                    strokeColor: '#4F46E5',
+                    strokeWeight: 4
+                  }
+                }}
+              />
+            )}
+          </GoogleMap>
         </div>
-      )}
+        {/* Informations de route */}
+        {routeInfo && status === 'accepted' && (
+          <div className="p-4 bg-gray-900 text-white">
+            <div className="flex justify-between items-center">
+              <div>
+                <span className="text-gray-400">Distance:</span>
+                <span className="ml-2 font-semibold">{routeInfo.distance}</span>
+              </div>
+              <div>
+                <span className="text-gray-400">Temps estimé:</span>
+                <span className="ml-2 font-semibold">{routeInfo.duration}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Status Section */}
       <div className="text-center">
