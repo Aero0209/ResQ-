@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { FaSpinner, FaCheckCircle, FaMapMarkerAlt, FaCar, FaTools, FaPhoneAlt } from 'react-icons/fa';
 import LocationMap from '../map/LocationMap';
+import { db } from '@/config/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 interface WaitingScreenProps {
   location: {
@@ -20,6 +22,8 @@ interface WaitingScreenProps {
   contactData: {
     phoneNumber: string;
   };
+  requestId?: string;
+  status: string;
 }
 
 const WaitingScreen: React.FC<WaitingScreenProps> = ({
@@ -27,8 +31,9 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
   vehicleData,
   breakdownData,
   contactData,
+  requestId,
+  status
 }) => {
-  const [status, setStatus] = useState<'searching' | 'found' | 'confirmed'>('searching');
   const [elapsedTime, setElapsedTime] = useState(0);
 
   useEffect(() => {
@@ -36,14 +41,8 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
       setElapsedTime((prev) => prev + 1);
     }, 1000);
 
-    // Simuler la recherche d'un dépanneur (à remplacer par une vraie logique)
-    const searchTimer = setTimeout(() => {
-      setStatus('found');
-    }, 5000);
-
     return () => {
       clearInterval(timer);
-      clearTimeout(searchTimer);
     };
   }, []);
 
@@ -58,20 +57,22 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
       {/* Status Section */}
       <div className="text-center">
         <div className="flex justify-center mb-4">
-          {status === 'searching' && (
+          {status === 'pending' && (
             <FaSpinner className="w-12 h-12 text-primary-600 animate-spin" />
           )}
-          {status === 'found' && (
+          {(status === 'accepted' || status === 'completed') && (
             <FaCheckCircle className="w-12 h-12 text-green-500" />
           )}
         </div>
         <h3 className="text-xl font-semibold text-white mb-2">
-          {status === 'searching' && 'Recherche d\'un dépanneur...'}
-          {status === 'found' && 'Dépanneur trouvé !'}
+          {status === 'pending' && 'Recherche d\'un dépanneur...'}
+          {status === 'accepted' && 'Demande acceptée !'}
+          {status === 'completed' && 'Intervention terminée'}
         </h3>
         <p className="text-gray-400">
-          {status === 'searching' && `Temps d'attente: ${formatTime(elapsedTime)}`}
-          {status === 'found' && 'Un dépanneur va vous contacter dans quelques instants'}
+          {status === 'pending' && `Temps d'attente: ${formatTime(elapsedTime)}`}
+          {status === 'accepted' && 'Un dépanneur est en route vers votre position'}
+          {status === 'completed' && 'Merci d\'avoir utilisé nos services'}
         </p>
       </div>
 

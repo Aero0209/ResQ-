@@ -14,6 +14,12 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
     }
 
+    // Fonction pour vérifier si l'utilisateur est le propriétaire de la demande
+    function isRequestOwner(requestData) {
+      return (isAuthenticated() && requestData.userId == request.auth.uid) ||
+             (!isAuthenticated() && requestData.userId == 'anonymous');
+    }
+
     // Règles pour la collection users
     match /users/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || hasRole('admin'));
@@ -25,18 +31,30 @@ service cloud.firestore {
       // Tout le monde peut créer une demande d'aide
       allow create: if true;
       
-      // Les mécaniciens peuvent lire toutes les demandes
-      allow read: if hasRole('mechanic') || hasRole('admin') || hasRole('dispatcher');
+      // Lecture autorisée si :
+      // - L'utilisateur est le propriétaire de la demande (authentifié ou anonyme)
+      // - L'utilisateur est un mécanicien
+      // - L'utilisateur est un admin
+      // - L'utilisateur est un dispatcher
+      allow read: if 
+        isRequestOwner(resource.data) ||
+        hasRole('mechanic') || 
+        hasRole('admin') || 
+        hasRole('dispatcher');
       
       // Les mécaniciens peuvent mettre à jour les demandes
-      allow update: if hasRole('mechanic') && (
-        // Peut accepter une nouvelle demande
-        (resource.data.status == 'pending' && request.resource.data.status == 'accepted') ||
-        // Peut refuser une demande
-        (resource.data.status == 'pending' && request.resource.data.status == 'rejected') ||
-        // Peut mettre à jour une demande qu'il a acceptée
-        (resource.data.mechanicId == request.auth.uid)
-      );
+      allow update: if 
+        // Les mécaniciens peuvent mettre à jour
+        (hasRole('mechanic') && (
+          // Peut accepter une nouvelle demande
+          (resource.data.status == 'pending' && request.resource.data.status == 'accepted') ||
+          // Peut refuser une demande
+          (resource.data.status == 'pending' && request.resource.data.status == 'rejected') ||
+          // Peut mettre à jour une demande qu'il a acceptée
+          (resource.data.mechanicId == request.auth.uid)
+        )) ||
+        // Le propriétaire de la demande peut annuler sa demande
+        (isRequestOwner(resource.data) && request.resource.data.status == 'cancelled');
     }
   }
 } 
