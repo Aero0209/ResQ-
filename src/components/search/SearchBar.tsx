@@ -311,6 +311,7 @@ const SearchBar = () => {
               contactData={contactData}
               requestId={requestId}
               status={requestStatus}
+              isLoaded={isLoaded}
             />
           );
         }

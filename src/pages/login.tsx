@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/hooks/useAuth';
 import { UserRole } from '@/types/auth';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '@/config/firebase';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -15,7 +17,9 @@ export default function Login() {
     setError('');
     try {
       const userData = await signInWithEmail(email, password);
-      if (userData.role === 'admin') {
+      if (userData.role === 'mechanic') {
+        router.push('/mechanic/dashboard');
+      } else if (userData.role === 'admin') {
         router.push('/admin/dashboard');
       } else {
         router.push('/');
@@ -28,7 +32,9 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     try {
       const userData = await signInWithGoogle();
-      if (userData.role === 'admin') {
+      if (userData.role === 'mechanic') {
+        router.push('/mechanic/dashboard');
+      } else if (userData.role === 'admin') {
         router.push('/admin/dashboard');
       } else {
         router.push('/');
@@ -38,25 +44,41 @@ export default function Login() {
     }
   };
 
-  const quickLogin = async (role: UserRole) => {
-    const testAccounts = {
-      admin: { email: 'admin@resq.com', password: 'testadmin123' },
-      owner: { email: 'owner@resq.com', password: 'testowner123' },
-      dispatcher: { email: 'dispatcher@resq.com', password: 'testdispatcher123' },
-      mechanic: { email: 'mechanic@resq.com', password: 'testmechanic123' },
-      user: { email: 'user@resq.com', password: 'testuser123' },
-    };
-
+  const quickLogin = async (role: string) => {
     try {
-      const account = testAccounts[role];
-      const userData = await signInWithEmail(account.email, account.password);
-      if (userData.role === 'admin') {
+      let email, password;
+      switch (role) {
+        case 'admin':
+          email = 'admin@resq.com';
+          password = 'admin123';
+          break;
+        case 'mechanic':
+          email = 'mechanic@resq.com';
+          password = 'password123';
+          break;
+        case 'dispatcher':
+          email = 'dispatcher@resq.com';
+          password = 'dispatcher123';
+          break;
+        case 'user':
+          email = 'user@resq.com';
+          password = 'user123';
+          break;
+        default:
+          return;
+      }
+
+      await signInWithEmailAndPassword(auth, email, password);
+      if (role === 'mechanic') {
+        router.push('/mechanic/dashboard');
+      } else if (role === 'admin') {
         router.push('/admin/dashboard');
       } else {
         router.push('/');
       }
-    } catch (err) {
-      setError(`Échec de la connexion rapide pour le rôle ${role}`);
+    } catch (error) {
+      console.error('Erreur de connexion:', error);
+      setError('Erreur lors de la connexion rapide');
     }
   };
 

@@ -1,19 +1,38 @@
-import { useEffect, useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
+import { FaCar, FaTools, FaMapMarkerAlt, FaPhone, FaCheck, FaTimes } from 'react-icons/fa';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
-import { HelpRequest } from '@/types/auth';
 import Layout from '@/components/layout/Layout';
 import MechanicRoute from '@/components/auth/MechanicRoute';
-import { FaMapMarkerAlt, FaCar, FaTools, FaPhone } from 'react-icons/fa';
 import { toast } from 'react-hot-toast';
+
+interface HelpRequest {
+  id: string;
+  userId: string;
+  userPhone: string;
+  location: {
+    address: string;
+    lat: number;
+    lng: number;
+  };
+  vehicleType: string;
+  vehicleBrand: string;
+  vehicleLicensePlate: string;
+  breakdownType: string;
+  description: string;
+  status: 'pending' | 'accepted' | 'completed' | 'cancelled';
+  createdAt: number;
+  mechanicId?: string;
+}
 
 const MechanicDashboard = () => {
   const router = useRouter();
   const { user } = useAuth();
   const [helpRequests, setHelpRequests] = useState<HelpRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
   const previousRequestsCount = useRef(0);
 
   useEffect(() => {
@@ -42,7 +61,6 @@ const MechanicDashboard = () => {
         const audio = new Audio('/sounds/notification.mp3');
         audio.play().catch(e => console.log('Erreur lors de la lecture du son:', e));
         
-        // Afficher une notification toast
         toast(message, {
           icon: '🚨',
           duration: 5000,
@@ -58,36 +76,67 @@ const MechanicDashboard = () => {
   }, [user]);
 
   const acceptRequest = async (requestId: string) => {
-    if (!user) return;
+    if (!user || processingRequestId) return;
 
+    setProcessingRequestId(requestId);
     try {
       const requestRef = doc(db, 'helpRequests', requestId);
       await updateDoc(requestRef, {
         status: 'accepted',
         mechanicId: user.uid,
+        mechanicName: user.displayName || 'Mécanicien',
+        mechanicPhone: user.phoneNumber || 'Non disponible',
+        estimatedArrival: '15-20 minutes',
+        acceptedAt: Date.now(),
         updatedAt: Date.now()
       });
       toast.success('Demande acceptée avec succès !');
+      router.push(`/mechanic/request/${requestId}`);
     } catch (error) {
       console.error('Erreur lors de l\'acceptation de la demande:', error);
       toast.error('Erreur lors de l\'acceptation de la demande');
+    } finally {
+      setProcessingRequestId(null);
     }
   };
 
   const rejectRequest = async (requestId: string) => {
-    if (!user) return;
+    if (!user || processingRequestId) return;
 
+    setProcessingRequestId(requestId);
     try {
       const requestRef = doc(db, 'helpRequests', requestId);
       await updateDoc(requestRef, {
-        status: 'cancelled',
+        status: 'rejected',
+        rejectedBy: user.uid,
+        rejectedAt: Date.now(),
         updatedAt: Date.now()
       });
       toast.success('Demande rejetée');
     } catch (error) {
       console.error('Erreur lors du rejet de la demande:', error);
       toast.error('Erreur lors du rejet de la demande');
+    } finally {
+      setProcessingRequestId(null);
     }
+  };
+
+  const formatTimeAgo = (timestamp: number) => {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    
+    if (minutes < 1) return 'À l\'instant';
+    if (minutes === 1) return 'Il y a 1 minute';
+    if (minutes < 60) return `Il y a ${minutes} minutes`;
+    
+    const hours = Math.floor(minutes / 60);
+    if (hours === 1) return 'Il y a 1 heure';
+    if (hours < 24) return `Il y a ${hours} heures`;
+    
+    const days = Math.floor(hours / 24);
+    if (days === 1) return 'Il y a 1 jour';
+    return `Il y a ${days} jours`;
   };
 
   const content = (
@@ -108,61 +157,68 @@ const MechanicDashboard = () => {
             {helpRequests.map((request) => (
               <div key={request.id} className="bg-white rounded-lg shadow-lg overflow-hidden">
                 <div className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-2">
-                      <FaCar className="text-accent-500" />
-                      <h3 className="text-lg font-semibold">
-                        {request.vehicleType || 'Véhicule non spécifié'}
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <span className="inline-block px-2 py-1 text-xs font-semibold bg-yellow-100 text-yellow-800 rounded-full mb-2">
+                        {formatTimeAgo(request.createdAt)}
+                      </span>
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {request.vehicleBrand} - {request.vehicleLicensePlate}
                       </h3>
                     </div>
-                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
-                      En attente
-                    </span>
                   </div>
 
-                  <div className="mt-4 space-y-3">
-                    <div className="flex items-start space-x-2">
-                      <FaTools className="text-gray-400 mt-1" />
+                  <div className="space-y-4">
+                    <div className="flex items-start space-x-3">
+                      <FaCar className="w-5 h-5 text-gray-400" />
                       <div>
-                        <p className="text-sm font-medium text-gray-600">Type de panne</p>
-                        <p className="text-sm text-gray-900">{request.breakdownType}</p>
+                        <p className="text-sm font-medium text-gray-600">Véhicule</p>
+                        <p className="text-sm text-gray-900">{request.vehicleType}</p>
                       </div>
                     </div>
 
-                    <div className="flex items-start space-x-2">
-                      <FaMapMarkerAlt className="text-gray-400 mt-1" />
+                    <div className="flex items-start space-x-3">
+                      <FaTools className="w-5 h-5 text-gray-400" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Type de panne</p>
+                        <p className="text-sm text-gray-900">{request.breakdownType}</p>
+                        <p className="text-sm text-gray-500 mt-1">{request.description}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start space-x-3">
+                      <FaMapMarkerAlt className="w-5 h-5 text-gray-400" />
                       <div>
                         <p className="text-sm font-medium text-gray-600">Localisation</p>
                         <p className="text-sm text-gray-900">{request.location.address}</p>
                       </div>
                     </div>
 
-                    <div className="flex items-start space-x-2">
-                      <FaPhone className="text-gray-400 mt-1" />
+                    <div className="flex items-start space-x-3">
+                      <FaPhone className="w-5 h-5 text-gray-400" />
                       <div>
                         <p className="text-sm font-medium text-gray-600">Contact</p>
-                        <p className="text-sm text-gray-900">{request.userPhone}</p>
+                        <p className="text-sm text-gray-900">+32 {request.userPhone}</p>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="mt-6">
-                    <p className="text-sm text-gray-600 mb-2">Description</p>
-                    <p className="text-sm text-gray-900">{request.description}</p>
                   </div>
 
                   <div className="mt-6 flex space-x-3">
                     <button
                       onClick={() => rejectRequest(request.id)}
-                      className="flex-1 bg-gray-500 text-white py-2 px-4 rounded-lg hover:bg-gray-600 transition-colors"
+                      disabled={!!processingRequestId}
+                      className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors disabled:opacity-50"
                     >
-                      Refuser
+                      <FaTimes />
+                      <span>Refuser</span>
                     </button>
                     <button
                       onClick={() => acceptRequest(request.id)}
-                      className="flex-1 bg-accent-500 text-white py-2 px-4 rounded-lg hover:bg-accent-600 transition-colors"
+                      disabled={!!processingRequestId}
+                      className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-accent-500 text-white rounded-lg hover:bg-accent-600 transition-colors disabled:opacity-50"
                     >
-                      Accepter
+                      <FaCheck />
+                      <span>Accepter</span>
                     </button>
                   </div>
                 </div>
