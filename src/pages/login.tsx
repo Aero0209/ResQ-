@@ -50,15 +50,15 @@ export default function Login() {
       switch (role) {
         case 'admin':
           email = 'admin@resq.com';
-          password = 'admin123';
+          password = 'testadmin123';
           break;
         case 'mechanic':
           email = 'mechanic@resq.com';
-          password = 'password123';
+          password = 'testmechanic123';
           break;
         case 'dispatcher':
           email = 'dispatcher@resq.com';
-          password = 'dispatcher123';
+          password = 'testdispatcher123';
           break;
         case 'user':
           email = 'user@resq.com';

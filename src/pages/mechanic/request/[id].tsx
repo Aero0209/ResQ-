@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, increment } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
+import { useSystemSettings } from '@/hooks/useSystemSettings';
 import Layout from '@/components/layout/Layout';
 import MechanicRoute from '@/components/auth/MechanicRoute';
 import { GoogleMap, useLoadScript, Marker, DirectionsRenderer, Libraries } from '@react-google-maps/api';
@@ -29,6 +30,7 @@ interface RequestDetails {
     lat: number;
     lng: number;
   };
+  acceptedAt?: number;
 }
 
 interface RouteInfo {
@@ -49,6 +51,7 @@ const RequestDetails = () => {
   const router = useRouter();
   const { id } = router.query;
   const { user } = useAuth();
+  const { settings } = useSystemSettings();
   const [request, setRequest] = useState<RequestDetails | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
@@ -56,6 +59,10 @@ const RequestDetails = () => {
   const [watchId, setWatchId] = useState<number | null>(null);
   const [geoErrorCount, setGeoErrorCount] = useState(0);
   const MAX_RETRY_ATTEMPTS = 5;
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [geoStatus, setGeoStatus] = useState<'idle' | 'trying' | 'error' | 'success'>('idle');
+  const [retryCount, setRetryCount] = useState(0);
+  const RETRY_DELAY = 2000; // 2 secondes
 
   const { isLoaded } = useLoadScript({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
@@ -64,11 +71,21 @@ const RequestDetails = () => {
 
   // Écouter les mises à jour de la demande
   useEffect(() => {
-    if (!id || !user) return;
+    if (!id || !user || !settings) return;
 
-    const unsubscribe = onSnapshot(doc(db, 'helpRequests', id as string), (doc) => {
+    const unsubscribe = onSnapshot(doc(db, 'helpRequests', id as string), async (doc) => {
       if (doc.exists()) {
         const data = doc.data();
+        
+        // En mode dispatcher, la demande est automatiquement acceptée
+        if (settings.dispatchMode === 'dispatcher' && data.status === 'assigned') {
+          await updateDoc(doc.ref, {
+            status: 'accepted',
+            acceptedAt: Date.now(),
+            updatedAt: Date.now()
+          });
+        }
+
         const requestData = {
           id: doc.id,
           userId: data.userId,
@@ -85,15 +102,11 @@ const RequestDetails = () => {
           description: data.breakdownData?.description || data.description,
           status: data.status,
           mechanicId: data.mechanicId,
-          mechanicLocation: data.mechanicLocation
+          mechanicLocation: data.mechanicLocation,
+          acceptedAt: data.acceptedAt
         };
 
         setRequest(requestData);
-
-        // Si le statut est "accepted", on arrête d'écouter les mises à jour
-        if (data.status === 'accepted' && data.mechanicId === user.uid) {
-          unsubscribe();
-        }
       }
     });
 
@@ -103,21 +116,27 @@ const RequestDetails = () => {
         navigator.geolocation.clearWatch(watchId);
       }
     };
-  }, [id, user]);
+  }, [id, user, settings]);
 
   // Gérer le suivi de la position actuelle
   useEffect(() => {
-    if (!request || !user || request.mechanicId !== user.uid || !isLoaded || geoErrorCount >= MAX_RETRY_ATTEMPTS) return;
+    if (!request || !user || !isLoaded || retryCount >= MAX_RETRY_ATTEMPTS) return;
 
-    if ('geolocation' in navigator) {
-      const watchIdNum = navigator.geolocation.watchPosition(
+    setGeoStatus('trying');
+    let retryTimeout: NodeJS.Timeout;
+    let watchId: number;
+
+    const startWatching = () => {
+      return navigator.geolocation.watchPosition(
         async (position) => {
           const newLocation = {
             lat: position.coords.latitude,
             lng: position.coords.longitude
           };
+          
           setCurrentLocation(newLocation);
-          setGeoErrorCount(0); // Réinitialiser le compteur d'erreurs en cas de succès
+          setGeoStatus('success');
+          setRetryCount(0);
 
           try {
             await updateDoc(doc(db, 'helpRequests', request.id), {
@@ -130,32 +149,80 @@ const RequestDetails = () => {
         },
         (error) => {
           console.error('Erreur de géolocalisation:', error);
-          setGeoErrorCount(prev => {
-            const newCount = prev + 1;
-            if (newCount >= MAX_RETRY_ATTEMPTS) {
-              toast.error('Impossible d\'obtenir votre position après plusieurs tentatives. Veuillez vérifier vos paramètres de localisation.');
-            } else {
-              toast.error(`Erreur de localisation (tentative ${newCount}/${MAX_RETRY_ATTEMPTS})`);
-            }
-            return newCount;
-          });
+          setGeoStatus('error');
+
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              toast.error("Veuillez autoriser l'accès à votre position pour continuer");
+              break;
+
+            case error.POSITION_UNAVAILABLE:
+              toast.error('Position indisponible. Vérifiez votre connexion GPS');
+              break;
+
+            case error.TIMEOUT:
+              setRetryCount(prev => {
+                const newCount = prev + 1;
+                if (newCount < MAX_RETRY_ATTEMPTS) {
+                  retryTimeout = setTimeout(() => {
+                    if (watchId) {
+                      navigator.geolocation.clearWatch(watchId);
+                    }
+                    watchId = startWatching();
+                  }, RETRY_DELAY);
+                  toast.error(`Nouvelle tentative de localisation (${newCount}/${MAX_RETRY_ATTEMPTS})`);
+                } else {
+                  toast.error("Impossible d'obtenir votre position. Veuillez vérifier vos paramètres GPS");
+                }
+                return newCount;
+              });
+              break;
+
+            default:
+              toast.error('Erreur de géolocalisation');
+          }
         },
         {
           enableHighAccuracy: true,
-          maximumAge: 10000,
-          timeout: 5000
+          maximumAge: 5000,
+          timeout: 10000
         }
       );
+    };
 
-      setWatchId(watchIdNum);
-    }
+    watchId = startWatching();
 
     return () => {
-      if (watchId !== null) {
+      if (watchId) {
         navigator.geolocation.clearWatch(watchId);
       }
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
     };
-  }, [request, user, isLoaded, geoErrorCount]);
+  }, [request, user, isLoaded, retryCount]);
+
+  // Composant pour afficher le statut de la géolocalisation
+  const GeoStatusIndicator = () => {
+    if (geoStatus === 'trying') {
+      return (
+        <div className="absolute top-2 left-2 bg-black/50 text-white px-3 py-1 rounded-full text-sm z-10">
+          <div className="flex items-center space-x-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+            <span>Mise à jour de la position...</span>
+          </div>
+        </div>
+      );
+    }
+    if (geoStatus === 'error') {
+      return (
+        <div className="absolute top-2 left-2 bg-red-500/50 text-white px-3 py-1 rounded-full text-sm z-10">
+          Erreur de localisation
+        </div>
+      );
+    }
+    return null;
+  };
 
   // Calculer l'itinéraire
   useEffect(() => {
@@ -193,20 +260,65 @@ const RequestDetails = () => {
     }
   };
 
-  const handleComplete = async () => {
-    if (!request) return;
+  const handleGeolocationError = (error: GeolocationPositionError) => {
+    const errorMessages: Record<number, string> = {
+      1: 'Permission refusée. Veuillez autoriser la géolocalisation.',
+      2: 'Position indisponible. Vérifiez votre connexion GPS.',
+      3: 'Délai d\'attente dépassé.'
+    };
+    
+    const message = errorMessages[error.code] || 'Erreur de géolocalisation';
+    toast.error(message);
+    setGeoErrorCount(prev => prev + 1);
+  };
 
+  const calculateDuration = (startTime: number, endTime: number): string => {
+    const durationInMinutes = Math.floor((endTime - startTime) / (1000 * 60));
+    
+    if (durationInMinutes < 60) {
+      return `${durationInMinutes} min`;
+    }
+    
+    const hours = Math.floor(durationInMinutes / 60);
+    const minutes = durationInMinutes % 60;
+    
+    if (minutes === 0) {
+      return `${hours}h`;
+    }
+    
+    return `${hours}h ${minutes}min`;
+  };
+
+  const handleComplete = async () => {
+    if (!request || !user || isProcessing) return;
+
+    setIsProcessing(true);
     try {
+      // Mettre à jour la demande
       await updateDoc(doc(db, 'helpRequests', request.id), {
         status: 'completed',
         completedAt: Date.now(),
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        finalLocation: currentLocation,
+        duration: calculateDuration(request.acceptedAt || 0, Date.now()) // Ajouter la durée
       });
+
+      // Mettre à jour le statut du mécanicien
+      await updateDoc(doc(db, 'users', user.uid), {
+        currentRequest: null,
+        available: true,
+        lastCompletedRequest: request.id,
+        lastLocation: currentLocation,
+        completedRequests: increment(1) // Incrémenter le compteur d'interventions
+      });
+
       toast.success('Intervention terminée avec succès');
       router.push('/mechanic/dashboard');
     } catch (error) {
-      console.error('Erreur lors de la completion de la demande:', error);
+      console.error('Erreur:', error);
       toast.error('Erreur lors de la completion de la demande');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -226,6 +338,7 @@ const RequestDetails = () => {
             <div className="bg-white rounded-lg shadow-lg overflow-hidden">
               {/* Map Section */}
               <div className="h-[400px] relative">
+                <GeoStatusIndicator />
                 <GoogleMap
                   mapContainerStyle={mapContainerStyle}
                   zoom={13}
@@ -380,9 +493,17 @@ const RequestDetails = () => {
                   <div className="mt-6">
                     <button
                       onClick={handleComplete}
-                      className="w-full bg-green-500 text-white py-3 rounded-lg hover:bg-green-600 transition-colors"
+                      disabled={isProcessing}
+                      className="w-full bg-green-500 text-white py-3 rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 flex items-center justify-center"
                     >
-                      Terminer l'intervention
+                      {isProcessing ? (
+                        <>
+                          <div className="animate-spin mr-2 h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
+                          Traitement...
+                        </>
+                      ) : (
+                        "Terminer l'intervention"
+                      )}
                     </button>
                   </div>
                 )}

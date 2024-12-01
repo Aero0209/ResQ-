@@ -23,8 +23,16 @@ export interface HelpRequest {
   vehicleType?: string;
   breakdownType: string;
   description: string;
-  status: 'pending' | 'accepted' | 'completed' | 'cancelled';
+  status: RequestStatus;
   mechanicId?: string;
   createdAt: number;
   updatedAt: number;
-} 
+}
+
+export type RequestStatus = 
+  | 'pending'     // En attente d'attribution
+  | 'assigned'    // Attribué à un mécanicien, en attente de confirmation
+  | 'accepted'    // Confirmé par le mécanicien
+  | 'completed'   // Intervention terminée
+  | 'cancelled'   // Annulé
+  | 'rejected';   // Refusé 

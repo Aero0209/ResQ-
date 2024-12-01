@@ -2,11 +2,13 @@ import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/hooks/useAuth';
-import { FaUser, FaTools, FaCog, FaHeadset } from 'react-icons/fa';
+import { FaUser, FaTools, FaCog, FaHeadset, FaClipboardList } from 'react-icons/fa';
+import { useSystemSettings } from '@/hooks/useSystemSettings';
 
 const Navbar: React.FC = () => {
   const router = useRouter();
   const { user, logout } = useAuth();
+  const { settings } = useSystemSettings();
 
   const handleLogout = async () => {
     try {
@@ -36,7 +38,7 @@ const Navbar: React.FC = () => {
       case 'dispatcher':
         return {
           href: '/dispatcher/dashboard',
-          icon: <FaHeadset className="w-5 h-5" />,
+          icon: <FaClipboardList className="w-5 h-5" />,
           text: 'Dispatch'
         };
       default:
@@ -45,6 +47,22 @@ const Navbar: React.FC = () => {
   };
 
   const dashboardLink = getDashboardLink();
+
+  // Afficher un badge si le mode dispatcher est activé
+  const getDispatchModeIndicator = () => {
+    if (user?.role === 'dispatcher' || user?.role === 'admin') {
+      return (
+        <span className={`ml-2 px-2 py-1 text-xs rounded-full ${
+          settings?.dispatchMode === 'dispatcher' 
+            ? 'bg-green-500 text-white' 
+            : 'bg-gray-500 text-white'
+        }`}>
+          {settings?.dispatchMode === 'dispatcher' ? 'Mode Dispatch' : 'Mode Auto'}
+        </span>
+      );
+    }
+    return null;
+  };
 
   return (
     <nav className="bg-black text-white">
@@ -67,6 +85,7 @@ const Navbar: React.FC = () => {
                     <span className="ml-2 px-2 py-1 bg-accent-500 text-white rounded-full text-xs">
                       {user.role}
                     </span>
+                    {getDispatchModeIndicator()}
                   </span>
                 </div>
 

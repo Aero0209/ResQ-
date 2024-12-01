@@ -20,49 +20,79 @@ service cloud.firestore {
              (!isAuthenticated() && requestData.userId == 'anonymous');
     }
 
+    // Nouvelle fonction pour vérifier le mode de dispatch
+    function isDispatcherMode() {
+      let settings = get(/databases/$(database)/documents/settings/dispatch);
+      return settings != null && settings.data.dispatchMode == 'dispatcher';
+    }
+
+    // Règles pour la collection settings
+    match /settings/{settingId} {
+      // Tout le monde peut lire les paramètres système
+      allow read: if true;
+      // Seul l'admin peut modifier les paramètres
+      allow write: if isAuthenticated() && hasRole('admin');
+    }
+
     // Règles pour la collection users
     match /users/{userId} {
-      // Permettre la lecture des informations des mécaniciens par tout le monde
       allow read: if 
-        // L'utilisateur est le propriétaire du profil
-        request.auth.uid == userId ||
-        // Ou l'utilisateur est un admin
-        hasRole('admin') ||
-        // Ou c'est un profil de mécanicien
-        get(/databases/$(database)/documents/users/$(userId)).data.role == 'mechanic';
+        get(/databases/$(database)/documents/users/$(userId)).data.role == 'mechanic' ||
+        (isAuthenticated() && (
+          request.auth.uid == userId ||
+          hasRole('admin') ||
+          hasRole('dispatcher')
+        ));
         
-      allow write: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAuthenticated() && 
+        (request.auth.uid == userId || hasRole('admin'));
     }
 
     // Règles pour la collection helpRequests
     match /helpRequests/{requestId} {
-      // Tout le monde peut créer une demande d'aide
       allow create: if true;
       
-      // Lecture autorisée si :
-      // - L'utilisateur est le propriétaire de la demande
-      // - L'utilisateur est un mécanicien
-      // - L'utilisateur est un admin
-      // - L'utilisateur est un dispatcher
       allow read: if 
-        isRequestOwner(resource.data) ||
+        (isAuthenticated() && request.auth.uid == resource.data.userId) ||
+        (!isAuthenticated() && resource.data.userId == 'anonymous') ||
         hasRole('mechanic') || 
         hasRole('admin') || 
         hasRole('dispatcher');
       
-      // Les mécaniciens peuvent mettre à jour les demandes
       allow update: if 
-        // Les mécaniciens peuvent mettre à jour
-        (hasRole('mechanic') && (
-          // Peut accepter une nouvelle demande
-          (resource.data.status == 'pending' && request.resource.data.status == 'accepted') ||
-          // Peut refuser une demande
-          (resource.data.status == 'pending' && request.resource.data.status == 'rejected') ||
-          // Peut mettre à jour une demande qu'il a acceptée
-          (resource.data.mechanicId == request.auth.uid)
-        )) ||
-        // Le propriétaire de la demande peut annuler sa demande
-        (isRequestOwner(resource.data) && request.resource.data.status == 'cancelled');
+        isAuthenticated() &&
+        (
+          // Les mécaniciens peuvent mettre à jour si :
+          (hasRole('mechanic') && (
+            // Peut accepter une nouvelle demande seulement en mode auto
+            (!isDispatcherMode() && resource.data.status == 'pending' && request.resource.data.status == 'accepted') ||
+            // Peut refuser une demande
+            (resource.data.status == 'pending' && request.resource.data.status == 'rejected') ||
+            // Peut mettre à jour une demande qu'il a acceptée
+            (resource.data.mechanicId == request.auth.uid)
+          )) ||
+          // Le propriétaire de la demande peut annuler
+          (resource.data.userId == request.auth.uid && request.resource.data.status == 'cancelled') ||
+          // Les dispatchers peuvent assigner des demandes en mode dispatcher
+          (hasRole('dispatcher') && isDispatcherMode() && (
+            // Peut assigner une demande à un mécanicien
+            (resource.data.status == 'pending' && request.resource.data.status == 'assigned') ||
+            // Peut réassigner une demande
+            (resource.data.status == 'assigned' && request.resource.data.status == 'assigned')
+          )) ||
+          // Les admins peuvent tout faire
+          hasRole('admin')
+        );
+
+      // Suppression non autorisée
+      allow delete: if false;
+    }
+
+    // Règles par défaut pour les autres collections
+    match /{document=**} {
+      allow read: if isAuthenticated() &&
+        (hasRole('admin') || hasRole('dispatcher'));
+      allow write: if isAuthenticated() && hasRole('admin');
     }
   }
 } 

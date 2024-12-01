@@ -5,6 +5,7 @@ import { db } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import ProtectedRoute from '@/components/auth/AdminRoute';
 import Layout from '@/components/layout/Layout';
+import DispatchSettings from '@/components/admin/DispatchSettings';
 
 interface Request {
   id: string;
@@ -54,12 +55,16 @@ const Dashboard: NextPage = () => {
   }, [user]);
 
   return (
-    <ProtectedRoute requiredRole="dispatcher">
+    <ProtectedRoute requiredRole="admin">
       <Layout>
         <div className="min-h-screen bg-black text-white py-12">
           <div className="container mx-auto px-4">
             <div className="flex justify-between items-center mb-8">
               <h1 className="text-3xl font-bold">Tableau de bord {user?.role}</h1>
+            </div>
+
+            <div className="mb-8">
+              <DispatchSettings />
             </div>
 
             {/* Synthflow Widget */}

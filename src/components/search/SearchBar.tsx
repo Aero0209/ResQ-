@@ -10,6 +10,10 @@ import { collection, addDoc, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'react-hot-toast';
+import { useSystemSettings } from '@/hooks/useSystemSettings';
+import { RequestStatus } from '@/types/auth';
+import { playNotificationSound } from '@/utils/sound';
+import { GOOGLE_MAPS_LIBRARIES } from '@/config/maps';
 
 interface Location {
   lat: number;
@@ -22,13 +26,12 @@ interface Suggestion {
   description: string;
 }
 
-const libraries: ["places"] = ["places"];
-
 const SearchBar = () => {
   const { user } = useAuth();
+  const { settings } = useSystemSettings();
   const { isLoaded, loadError } = useLoadScript({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
-    libraries,
+    libraries: GOOGLE_MAPS_LIBRARIES
   });
 
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
@@ -43,27 +46,25 @@ const SearchBar = () => {
   const [contactData, setContactData] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [requestId, setRequestId] = useState('');
-  const [requestStatus, setRequestStatus] = useState('pending');
+  const [requestStatus, setRequestStatus] = useState<RequestStatus>('pending');
 
   useEffect(() => {
     if (!requestId) return;
-
-    try {
-      const unsubscribe = onSnapshot(doc(db, 'helpRequests', requestId), (doc) => {
-        if (doc.exists()) {
-          const data = doc.data();
-          setRequestStatus(data.status);
-          console.log('Request status updated:', data.status);
+    
+    const unsubscribe = onSnapshot(doc(db, 'helpRequests', requestId), (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        setRequestStatus(data.status as RequestStatus);
+        
+        if (data.status === 'accepted' && requestStatus !== 'accepted') {
+          playNotificationSound();
+          toast.success('Le mécanicien a accepté votre demande !');
         }
-      }, (error) => {
-        console.error('Error listening to request status:', error);
-      });
+      }
+    });
 
-      return () => unsubscribe();
-    } catch (error) {
-      console.error('Error setting up listener:', error);
-    }
-  }, [requestId]);
+    return () => unsubscribe();
+  }, [requestId, requestStatus]);
 
   useEffect(() => {
     let autocompleteService: google.maps.places.AutocompleteService | null = null;
@@ -197,7 +198,7 @@ const SearchBar = () => {
         vehicleLicensePlate: vehicleData.licensePlate,
         breakdownType: breakdownData.type,
         description: breakdownData.description,
-        status: 'pending',
+        status: 'pending' as RequestStatus,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         mechanicId: null
@@ -311,6 +312,7 @@ const SearchBar = () => {
               contactData={contactData}
               requestId={requestId}
               status={requestStatus}
+              setRequestStatus={setRequestStatus}
               isLoaded={isLoaded}
             />
           );

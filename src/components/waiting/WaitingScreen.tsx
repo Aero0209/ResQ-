@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { FaSpinner, FaCheckCircle, FaMapMarkerAlt, FaCar, FaTools, FaPhoneAlt, FaUser } from 'react-icons/fa';
+import { FaSpinner, FaCheckCircle, FaMapMarkerAlt, FaCar, FaTools, FaPhoneAlt, FaUser, FaTimes, FaClock } from 'react-icons/fa';
 import LocationMap from '../map/LocationMap';
 import { db } from '@/config/firebase';
 import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import { GoogleMap, Marker, Circle, Polyline, DirectionsRenderer } from '@react-google-maps/api';
+import { RequestStatus } from '@/types/auth';
+import { playNotificationSound } from '@/utils/sound';
+import { GOOGLE_MAPS_LIBRARIES, DEFAULT_MAP_OPTIONS } from '@/config/maps';
 
 interface WaitingScreenProps {
   location: {
@@ -25,7 +28,8 @@ interface WaitingScreenProps {
     phoneNumber: string;
   };
   requestId?: string;
-  status: string;
+  status: RequestStatus;
+  setRequestStatus: (status: RequestStatus) => void;
   isLoaded: boolean;
 }
 
@@ -48,6 +52,7 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
   contactData,
   requestId,
   status,
+  setRequestStatus,
   isLoaded
 }) => {
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -59,6 +64,7 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
   const [isCancelling, setIsCancelling] = useState(false);
   const [geoErrorCount, setGeoErrorCount] = useState(0);
   const MAX_RETRY_ATTEMPTS = 5;
+  const [geoStatus, setGeoStatus] = useState<'idle' | 'trying' | 'error' | 'success'>('idle');
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -79,52 +85,68 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
       if (docSnapshot.exists()) {
         const data = docSnapshot.data();
         
-        // Si la demande est complétée ou annulée, on arrête d'écouter
-        if (data.status === 'completed' || data.status === 'cancelled') {
-          unsubscribe();
-          return;
+        // Mettre à jour le statut
+        if (data.status !== status) {
+          setRequestStatus(data.status as RequestStatus);
         }
-
-        if (data.mechanicId && data.status === 'accepted') {
+        
+        // Si la demande a un mécanicien assigné ou acceptée
+        if (data.mechanicId) {
           try {
-            // Mettre à jour les informations de base du mécanicien depuis la demande
+            const mechanicRef = doc(db, 'users', data.mechanicId);
+            const mechanicDoc = await getDoc(mechanicRef);
+            
+            if (mechanicDoc.exists()) {
+              const mechanicData = mechanicDoc.data();
+              // Stocker les informations de base même si on ne peut pas accéder au profil complet
+              setMechanicInfo({
+                name: data.mechanicName || mechanicData.displayName || 'Mécanicien',
+                phone: data.mechanicPhone || mechanicData.phoneNumber || 'Non disponible',
+                rating: mechanicData.rating || 4.5,
+                estimatedArrival: data.estimatedArrival || '15-20 minutes'
+              });
+
+              // Notifications
+              if (data.status === 'accepted' && status !== 'accepted') {
+                playNotificationSound();
+                toast.success('Le mécanicien a accepté votre demande !');
+              } else if (data.status === 'assigned' && status !== 'assigned') {
+                playNotificationSound();
+                toast.success('Un mécanicien vous a été assigné !');
+              }
+            } else {
+              // Si on ne peut pas accéder au profil du mécanicien, utiliser les données de base
+              setMechanicInfo({
+                name: data.mechanicName || 'Mécanicien',
+                phone: data.mechanicPhone || 'Non disponible',
+                rating: 4.5,
+                estimatedArrival: data.estimatedArrival || '15-20 minutes'
+              });
+            }
+          } catch (error) {
+            console.error('Erreur lors de la récupération des infos du mécanicien:', error);
+            // Utiliser les informations de base stockées dans la demande
             setMechanicInfo({
               name: data.mechanicName || 'Mécanicien',
               phone: data.mechanicPhone || 'Non disponible',
               rating: 4.5,
               estimatedArrival: data.estimatedArrival || '15-20 minutes'
             });
-
-            // Mettre à jour la position du mécanicien
-            if (data.mechanicLocation) {
-              setMechanicLocation(data.mechanicLocation);
-            }
-
-            // Récupérer les informations supplémentaires du mécanicien une seule fois
-            if (!mechanicInfo) {
-              const mechanicRef = doc(db, 'users', data.mechanicId);
-              const mechanicDoc = await getDoc(mechanicRef);
-              
-              if (mechanicDoc.exists()) {
-                const mechanicData = mechanicDoc.data();
-                setMechanicInfo(prev => ({
-                  ...prev!,
-                  rating: mechanicData.rating || prev!.rating,
-                  name: prev!.name,
-                  phone: prev!.phone,
-                  estimatedArrival: prev!.estimatedArrival
-                }));
-              }
-            }
-          } catch (error) {
-            console.error('Erreur lors de la récupération des infos du mécanicien:', error);
           }
         }
+
+        // Mettre à jour la position du mécanicien si disponible
+        if (data.mechanicLocation) {
+          setMechanicLocation(data.mechanicLocation);
+        }
       }
+    }, (error) => {
+      console.error('Erreur lors de l\'écoute des mises à jour:', error);
+      toast.error('Erreur lors de la mise à jour des informations');
     });
 
     return () => unsubscribe();
-  }, [requestId]);
+  }, [requestId, status]);
 
   // Calculer l'itinéraire lorsque la position du mécanicien change
   useEffect(() => {
@@ -150,41 +172,133 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
     );
   }, [mechanicLocation, location, isLoaded, status]);
 
-  // Suivre la position actuelle
+  // Gérer le suivi de la position actuelle
   useEffect(() => {
     if (!isLoaded || geoErrorCount >= MAX_RETRY_ATTEMPTS) return;
 
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        setCurrentLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
-        });
-        setGeoErrorCount(0); // Réinitialiser le compteur d'erreurs en cas de succès
-      },
-      (error) => {
-        console.error('Erreur de géolocalisation:', error);
-        setGeoErrorCount(prev => {
-          const newCount = prev + 1;
-          if (newCount >= MAX_RETRY_ATTEMPTS) {
-            toast.error('Impossible d\'obtenir votre position après plusieurs tentatives. Veuillez vérifier vos paramètres de localisation.');
-          } else {
-            toast.error(`Erreur de localisation (tentative ${newCount}/${MAX_RETRY_ATTEMPTS})`);
+    setGeoStatus('trying');
+    let retryTimeout: NodeJS.Timeout;
+    let watchId: number | null = null;
+
+    const getPosition = () => {
+      // D'abord essayer d'obtenir une position unique
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          // Si on obtient une position, on la définit
+          setCurrentLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+          setGeoStatus('success');
+          setGeoErrorCount(0);
+
+          // Puis on démarre le suivi continu
+          watchId = navigator.geolocation.watchPosition(
+            (pos) => {
+              setCurrentLocation({
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude
+              });
+              setGeoStatus('success');
+            },
+            (error) => {
+              console.warn('Erreur de suivi:', error);
+              // Ne pas afficher d'erreur ici car on a déjà une position
+            },
+            {
+              enableHighAccuracy: true,
+              maximumAge: 10000,
+              timeout: 10000
+            }
+          );
+        },
+        (error) => {
+          console.error('Erreur de géolocalisation:', error);
+          setGeoStatus('error');
+          
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              toast.error('Veuillez autoriser l\'accès à votre position');
+              break;
+            case error.POSITION_UNAVAILABLE:
+              // Réessayer avec des paramètres moins stricts
+              navigator.geolocation.getCurrentPosition(
+                (position) => {
+                  setCurrentLocation({
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude
+                  });
+                  setGeoStatus('success');
+                  setGeoErrorCount(0);
+                },
+                () => {
+                  toast.error('Position indisponible. Vérifiez que votre GPS est activé');
+                  setGeoErrorCount(prev => prev + 1);
+                },
+                {
+                  enableHighAccuracy: false, // Essayer sans haute précision
+                  maximumAge: 30000,        // Accepter des positions plus anciennes
+                  timeout: 20000            // Donner plus de temps
+                }
+              );
+              break;
+            case error.TIMEOUT:
+              setGeoErrorCount(prev => {
+                const newCount = prev + 1;
+                if (newCount < MAX_RETRY_ATTEMPTS) {
+                  retryTimeout = setTimeout(getPosition, 2000);
+                  toast.error(`Nouvelle tentative de localisation (${newCount}/${MAX_RETRY_ATTEMPTS})`);
+                } else {
+                  toast.error('Impossible d\'obtenir votre position. Veuillez réessayer plus tard.');
+                }
+                return newCount;
+              });
+              break;
+            default:
+              toast.error('Erreur de géolocalisation');
           }
-          return newCount;
-        });
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 10000,
-        timeout: 5000
-      }
-    );
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 15000
+        }
+      );
+    };
+
+    getPosition();
 
     return () => {
-      navigator.geolocation.clearWatch(watchId);
+      if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
     };
   }, [isLoaded, geoErrorCount]);
+
+  // Afficher un message si la géolocalisation est en cours
+  const renderGeoStatus = () => {
+    if (geoStatus === 'trying') {
+      return (
+        <div className="absolute top-2 left-2 bg-black/50 text-white px-3 py-1 rounded-full text-sm">
+          <div className="flex items-center space-x-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+            <span>Localisation en cours...</span>
+          </div>
+        </div>
+      );
+    }
+    if (geoStatus === 'error') {
+      return (
+        <div className="absolute top-2 left-2 bg-red-500/50 text-white px-3 py-1 rounded-full text-sm">
+          Erreur de localisation
+        </div>
+      );
+    }
+    return null;
+  };
 
   const handleCancelRequest = async () => {
     if (!requestId || isCancelling) return;
@@ -254,6 +368,134 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
     anchor: new google.maps.Point(20, 20)
   };
 
+  const renderStatusMessage = () => {
+    switch (status) {
+      case 'pending':
+        return (
+          <>
+            <FaSpinner className="w-12 h-12 text-primary-600 animate-spin" />
+            <h3 className="text-xl font-semibold text-white">
+              Recherche d'un dépanneur...
+            </h3>
+            <p className="text-gray-400">
+              Temps d'attente: {formatTime(elapsedTime)}
+            </p>
+          </>
+        );
+
+      case 'assigned':
+        return (
+          <>
+            <FaTools className="w-12 h-12 text-accent-500" />
+            <h3 className="text-xl font-semibold text-white">
+              Un mécanicien vous a été assigné !
+            </h3>
+            {mechanicInfo && (
+              <div className="text-gray-400">
+                <p className="font-medium text-lg mb-2">En attente de confirmation...</p>
+                <p>Nom : {mechanicInfo.name}</p>
+                <p>Contact : {mechanicInfo.phone}</p>
+                <p>Note : {renderStars(mechanicInfo.rating)}</p>
+                <button
+                  onClick={() => window.location.href = `tel:${mechanicInfo.phone}`}
+                  className="mt-4 px-4 py-2 bg-accent-500 text-white rounded-lg hover:bg-accent-600"
+                >
+                  Appeler le mécanicien
+                </button>
+              </div>
+            )}
+          </>
+        );
+
+      case 'accepted':
+        return (
+          <>
+            <FaCheckCircle className="w-12 h-12 text-green-500" />
+            <h3 className="text-xl font-semibold text-white">
+              Le mécanicien a accepté votre demande !
+            </h3>
+            <p className="text-gray-400 mt-2">
+              Votre dépanneur est en route. Vous pouvez suivre sa position sur la carte.
+            </p>
+          </>
+        );
+
+      case 'completed':
+        return (
+          <>
+            <FaCheckCircle className="w-12 h-12 text-green-500" />
+            <h3 className="text-xl font-semibold text-white">
+              Intervention terminée
+            </h3>
+            <p className="text-gray-400">
+              Merci d'avoir utilisé nos services !
+            </p>
+          </>
+        );
+
+      case 'cancelled':
+        return (
+          <>
+            <FaTimes className="w-12 h-12 text-red-500" />
+            <h3 className="text-xl font-semibold text-white">
+              Demande annulée
+            </h3>
+          </>
+        );
+
+      case 'rejected':
+        return (
+          <>
+            <FaTimes className="w-12 h-12 text-red-500" />
+            <h3 className="text-xl font-semibold text-white">
+              Demande refusée
+            </h3>
+            <p className="text-gray-400">
+              Nous sommes désolés, votre demande a été refusée.
+            </p>
+          </>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  // Modifier la partie du marqueur du mécanicien
+  const getMechanicMarkerIcon = (mechanicLoc: { lat: number; lng: number }) => {
+    if (!mechanicLoc || !location) return {};
+
+    try {
+      const rotation = google.maps.geometry?.spherical
+        ? google.maps.geometry.spherical.computeHeading(
+            new google.maps.LatLng(mechanicLoc.lat, mechanicLoc.lng),
+            new google.maps.LatLng(location.lat, location.lng)
+          )
+        : 0;
+
+      return {
+        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+        fillColor: '#10B981',
+        fillOpacity: 1,
+        strokeWeight: 2,
+        strokeColor: '#FFFFFF',
+        scale: 7,
+        rotation
+      };
+    } catch (error) {
+      console.warn('Erreur lors du calcul de la rotation:', error);
+      return {
+        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+        fillColor: '#10B981',
+        fillOpacity: 1,
+        strokeWeight: 2,
+        strokeColor: '#FFFFFF',
+        scale: 7,
+        rotation: 0
+      };
+    }
+  };
+
   if (!isLoaded) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -264,75 +506,51 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Map Section - Toujours visible */}
-      <div className="bg-gray-800 rounded-lg overflow-hidden">
+      {/* Status Section avec un style amélioré */}
+      <div className="flex flex-col items-center justify-center space-y-4 p-8 bg-gray-800 rounded-lg shadow-lg">
+        {renderStatusMessage()}
+      </div>
+
+      {/* Map Section avec des labels améliorés */}
+      <div className="bg-gray-800 rounded-lg overflow-hidden shadow-lg">
         <div className="h-[400px] relative">
+          {renderGeoStatus()}
           <GoogleMap
             mapContainerStyle={mapStyles}
-            center={currentLocation || location}
+            center={mechanicLocation || location}
             zoom={13}
             options={{
-              styles: [
-                {
-                  featureType: 'all',
-                  elementType: 'all',
-                  stylers: [
-                    { saturation: -100 },
-                    { lightness: 0 }
-                  ]
-                }
-              ],
-              disableDefaultUI: true,
+              ...DEFAULT_MAP_OPTIONS,
               zoomControl: true,
-              streetViewControl: true,
+              mapTypeControl: false,
+              scaleControl: true,
+              streetViewControl: false,
+              rotateControl: false,
               fullscreenControl: true
             }}
           >
-            {/* Marqueur pour la position initiale */}
+            {/* Client Marker */}
             <Marker
               position={location}
               icon={{
-                path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                path: google.maps.SymbolPath.CIRCLE,
                 fillColor: '#FF4B4B',
                 fillOpacity: 1,
                 strokeWeight: 2,
                 strokeColor: '#FFFFFF',
-                scale: 7,
-                rotation: 180
+                scale: 7
               }}
               label={{
-                text: 'Position initiale',
-                className: 'map-marker-label',
-                color: '#FF4B4B',
-                fontSize: '14px',
+                text: 'Ma position',
+                className: 'map-marker-label bg-red-500 text-white px-2 py-1 rounded-full text-xs',
+                color: '#FFFFFF',
+                fontSize: '12px',
                 fontWeight: 'bold'
               }}
             />
 
-            {/* Marqueur pour ma position actuelle */}
-            {currentLocation && (
-              <Marker
-                position={currentLocation}
-                icon={{
-                  path: google.maps.SymbolPath.CIRCLE,
-                  fillColor: '#4F46E5',
-                  fillOpacity: 1,
-                  strokeWeight: 2,
-                  strokeColor: '#FFFFFF',
-                  scale: 7
-                }}
-                label={{
-                  text: 'Ma position',
-                  className: 'map-marker-label',
-                  color: '#4F46E5',
-                  fontSize: '14px',
-                  fontWeight: 'bold'
-                }}
-              />
-            )}
-
-            {/* Marqueur pour le mécanicien */}
-            {status === 'accepted' && mechanicLocation && (
+            {/* Mechanic Marker avec une meilleure visibilité */}
+            {mechanicLocation && (status === 'assigned' || status === 'accepted') && (
               <Marker
                 position={mechanicLocation}
                 icon={{
@@ -341,102 +559,105 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
                   fillOpacity: 1,
                   strokeWeight: 2,
                   strokeColor: '#FFFFFF',
-                  scale: 7
+                  scale: 7,
+                  rotation: google.maps.geometry?.spherical
+                    ? google.maps.geometry.spherical.computeHeading(
+                        new google.maps.LatLng(mechanicLocation.lat, mechanicLocation.lng),
+                        new google.maps.LatLng(location.lat, location.lng)
+                      )
+                    : 0
                 }}
                 label={{
                   text: 'Dépanneur',
-                  className: 'map-marker-label',
-                  color: '#10B981',
-                  fontSize: '14px',
+                  className: 'map-marker-label bg-green-500 text-white px-2 py-1 rounded-full text-xs',
+                  color: '#FFFFFF',
+                  fontSize: '12px',
                   fontWeight: 'bold'
                 }}
               />
             )}
 
-            {/* Afficher l'itinéraire */}
-            {directions && (
+            {/* Directions avec un style amélioré */}
+            {directions && (status === 'assigned' || status === 'accepted') && (
               <DirectionsRenderer
                 directions={directions}
                 options={{
                   suppressMarkers: true,
                   polylineOptions: {
                     strokeColor: '#4F46E5',
-                    strokeWeight: 4
+                    strokeWeight: 5,
+                    strokeOpacity: 0.8
                   }
                 }}
               />
             )}
           </GoogleMap>
         </div>
-        {/* Informations de route */}
-        {routeInfo && status === 'accepted' && (
-          <div className="p-4 bg-gray-900 text-white">
+
+        {/* Route Info avec un meilleur design */}
+        {routeInfo && (status === 'assigned' || status === 'accepted') && (
+          <div className="p-6 bg-gray-900 text-white border-t border-gray-700">
             <div className="flex justify-between items-center">
-              <div>
+              <div className="flex items-center space-x-2">
+                <FaMapMarkerAlt className="text-accent-500" />
                 <span className="text-gray-400">Distance:</span>
-                <span className="ml-2 font-semibold">{routeInfo.distance}</span>
+                <span className="font-semibold text-lg">{routeInfo.distance}</span>
               </div>
-              <div>
+              <div className="flex items-center space-x-2">
+                <FaClock className="text-accent-500" />
                 <span className="text-gray-400">Temps estimé:</span>
-                <span className="ml-2 font-semibold">{routeInfo.duration}</span>
+                <span className="font-semibold text-lg">{routeInfo.duration}</span>
               </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* Status Section */}
-      <div className="text-center">
-        <div className="flex justify-center mb-4">
-          {status === 'pending' && (
-            <FaSpinner className="w-12 h-12 text-primary-600 animate-spin" />
-          )}
-          {(status === 'accepted' || status === 'completed') && (
-            <FaCheckCircle className="w-12 h-12 text-green-500" />
-          )}
-        </div>
-        <h3 className="text-xl font-semibold text-white mb-2">
-          {status === 'pending' && 'Recherche d\'un dépanneur...'}
-          {status === 'accepted' && 'Demande acceptée !'}
-          {status === 'completed' && 'Intervention terminée'}
-          {status === 'cancelled' && 'Demande annulée'}
-        </h3>
-        <p className="text-gray-400">
-          {status === 'pending' && `Temps d'attente: ${formatTime(elapsedTime)}`}
-          {status === 'accepted' && mechanicInfo && `Un dépanneur arrive dans ${mechanicInfo.estimatedArrival}`}
-          {status === 'completed' && 'Merci d\'avoir utilisé nos services'}
-          {status === 'cancelled' && 'Votre demande a été annulée'}
-        </p>
-      </div>
-
-      {/* Mechanic Info Section */}
+      {/* Mechanic Info Section avec un design amélioré */}
       {status === 'accepted' && mechanicInfo && (
-        <div className="bg-gray-800 rounded-lg p-4 space-y-4">
-          <h4 className="text-white font-medium mb-3">Votre dépanneur :</h4>
+        <div className="bg-gray-800 rounded-lg p-6 shadow-lg space-y-6">
+          <div className="flex items-center justify-between border-b border-gray-700 pb-4">
+            <h4 className="text-xl font-semibold text-white">Votre dépanneur</h4>
+            <div className="text-yellow-500 text-lg">{renderStars(mechanicInfo.rating)}</div>
+          </div>
           
-          <div className="flex items-start space-x-3 text-gray-300">
-            <FaUser className="w-5 h-5 mt-1 text-primary-600 flex-shrink-0" />
-            <div>
-              <p className="font-medium">{mechanicInfo.name}</p>
-              <p className="text-sm text-yellow-500">{renderStars(mechanicInfo.rating)}</p>
-              <p className="text-sm text-gray-400">Arrivée estimée : {mechanicInfo.estimatedArrival}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div className="flex items-center space-x-3 text-gray-300">
+                <FaUser className="w-5 h-5 text-accent-500" />
+                <div>
+                  <p className="font-medium text-lg">{mechanicInfo.name}</p>
+                  <p className="text-sm text-gray-400">Professionnel certifié</p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-3 text-gray-300">
+                <FaClock className="w-5 h-5 text-accent-500" />
+                <div>
+                  <p className="font-medium">Arrivée estimée</p>
+                  <p className="text-accent-500">{mechanicInfo.estimatedArrival}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center space-x-3 text-gray-300">
+                <FaPhoneAlt className="w-5 h-5 text-accent-500" />
+                <div>
+                  <p className="font-medium">Contact</p>
+                  <p className="text-gray-400">{mechanicInfo.phone}</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => window.location.href = `tel:${mechanicInfo.phone}`}
+                className="w-full bg-accent-500 text-white py-3 rounded-lg hover:bg-accent-600 transition-colors flex items-center justify-center space-x-2"
+              >
+                <FaPhoneAlt />
+                <span>Appeler le dépanneur</span>
+              </button>
             </div>
           </div>
-
-          <div className="flex items-start space-x-3 text-gray-300">
-            <FaPhoneAlt className="w-5 h-5 mt-1 text-primary-600 flex-shrink-0" />
-            <div>
-              <p className="font-medium">Contact</p>
-              <p className="text-sm text-gray-400">{mechanicInfo.phone}</p>
-            </div>
-          </div>
-
-          <button
-            onClick={() => window.location.href = `tel:${mechanicInfo.phone}`}
-            className="w-full mt-2 bg-accent-500 text-white py-2 rounded-lg hover:bg-accent-600 transition-colors"
-          >
-            Appeler le dépanneur
-          </button>
         </div>
       )}
 
@@ -479,18 +700,28 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
         </div>
       </div>
 
-      {/* Cancel Button - Only show when pending or accepted */}
-      {(status === 'pending' || status === 'accepted') && (
-        <div className="flex justify-center">
+      {/* Actions Section */}
+      <div className="flex justify-center">
+        {(status === 'pending' || status === 'assigned') && (
           <button
             onClick={handleCancelRequest}
             disabled={isCancelling}
             className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
           >
-            <span>{isCancelling ? 'Annulation...' : 'Annuler la demande'}</span>
+            {isCancelling ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                <span>Annulation...</span>
+              </>
+            ) : (
+              <>
+                <FaTimes />
+                <span>Annuler la demande</span>
+              </>
+            )}
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };
